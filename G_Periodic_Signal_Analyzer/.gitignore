@@ -1,0 +1,19 @@
+# This workspace may later be extracted as a standalone repository.
+
+**/Debug/
+**/Release/
+**/Objects/
+**/Listings/
+**/*.o
+**/*.d
+**/*.su
+**/*.cyclo
+**/*.elf
+**/*.axf
+**/*.hex
+**/*.bin
+**/*.map
+**/*.list
+**/*.lst
+**/*.uvguix.*
+**/.settings/language.settings.xml

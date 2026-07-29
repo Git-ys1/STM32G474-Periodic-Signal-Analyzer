@@ -1,0 +1,33 @@
+# Local archive retained outside the published source tree.
+/test/
+
+# Compressed hand-off packages are local backups, not source.
+*.zip
+
+# STM32CubeIDE build outputs.
+**/Debug/
+**/Release/
+**/*.o
+**/*.d
+**/*.su
+**/*.cyclo
+**/*.elf
+**/*.map
+**/*.list
+
+# Keil build outputs and per-user state.
+**/Objects/
+**/Listings/
+**/*.axf
+**/*.hex
+**/*.bin
+**/*.lst
+**/*.uvguix.*
+
+# IDE and operating-system noise.
+**/.metadata/
+**/.idea/
+**/.vscode/
+**/.settings/language.settings.xml
+**/Thumbs.db
+**/Desktop.ini
