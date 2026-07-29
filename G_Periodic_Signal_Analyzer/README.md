@@ -21,7 +21,7 @@ G_Periodic_Signal_Analyzer/
 - 显示器：淘晶驰 X2 系列 TJC8048X270_011R；
 - 当前用途：独立验证串口屏页面、1/3 周期时域显示、参数文本、定性频谱和触摸按钮；
 - 当前演示数据：内部 100 kHz 正弦和 256 点演示 DFT；
-- 当前状态：显示链路已模块化为 `display` 与 `tjc_hmi`。
+- 当前状态：以已验证的单文件 `main.c` 为行为基准，显示链路仅封装为一个 `display` 模块；`main.c` 只负责初始化和循环调用。
 
 ## `teammate_adc_reference`
 
@@ -41,3 +41,5 @@ G_Periodic_Signal_Analyzer/
 
 具体接口约定见 [docs/integration-notes.md](docs/integration-notes.md)。
 
+当前显示冻结基线及本次故障复盘见
+[docs/DISPLAY_BASELINE_FREEZE_2026-07-30.md](docs/DISPLAY_BASELINE_FREEZE_2026-07-30.md)。
