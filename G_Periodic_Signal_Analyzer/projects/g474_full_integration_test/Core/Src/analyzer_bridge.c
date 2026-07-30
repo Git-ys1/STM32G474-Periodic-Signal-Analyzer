@@ -14,7 +14,21 @@
 
 #if ANALYZER_TEST_ENABLE
 #include "generated_adc_tests.h"
-#define ANALYZER_TEST_CASE_COUNT GENERATED_ADC_TEST_CASE_COUNT
+
+#if ANALYZER_CUSTOM_TEST_ENABLE
+#include "generated_custom_adc_tests.h"
+#define ANALYZER_TEST_CASE_COUNT       GENERATED_CUSTOM_ADC_TEST_CASE_COUNT
+#define ANALYZER_TEST_SAMPLE_COUNT     GENERATED_CUSTOM_ADC_SAMPLE_COUNT
+#define ANALYZER_TEST_SAMPLE_RATE_HZ   GENERATED_CUSTOM_ADC_SAMPLE_RATE_HZ
+#define ANALYZER_TEST_VOLTS_PER_CODE   GENERATED_CUSTOM_ADC_VOLTS_PER_CODE
+#define ANALYZER_TEST_CASES            s_generated_custom_adc_test_cases
+#else
+#define ANALYZER_TEST_CASE_COUNT       GENERATED_ADC_TEST_CASE_COUNT
+#define ANALYZER_TEST_SAMPLE_COUNT     GENERATED_ADC_SAMPLE_COUNT
+#define ANALYZER_TEST_SAMPLE_RATE_HZ   GENERATED_ADC_SAMPLE_RATE_HZ
+#define ANALYZER_TEST_VOLTS_PER_CODE   GENERATED_ADC_VOLTS_PER_CODE
+#define ANALYZER_TEST_CASES            s_generated_adc_test_cases
+#endif
 #endif
 
 static AnalyzerResult s_real_result;
@@ -500,9 +514,9 @@ static bool AnalyzerBridge_BuildTestResult(
     if (!AnalyzerBridge_BuildRealWaveform(
             result,
             test_case->adc_codes,
-            GENERATED_ADC_SAMPLE_COUNT,
-            GENERATED_ADC_VOLTS_PER_CODE,
-            GENERATED_ADC_SAMPLE_RATE_HZ))
+            ANALYZER_TEST_SAMPLE_COUNT,
+            ANALYZER_TEST_VOLTS_PER_CODE,
+            ANALYZER_TEST_SAMPLE_RATE_HZ))
     {
         return false;
     }
@@ -662,7 +676,7 @@ void AnalyzerBridge_RunRandomTest(void)
     }
 
     if (AnalyzerBridge_BuildTestResult(
-            &s_generated_adc_test_cases[selected_case],
+            &ANALYZER_TEST_CASES[selected_case],
             &s_test_result))
     {
         s_last_test_case = selected_case;

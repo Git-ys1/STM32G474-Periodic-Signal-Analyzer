@@ -1,0 +1,94 @@
+{
+  "true_frequency_hz": 256000.0,
+  "sample_rate_hz": 1024000.0,
+  "sample_count": 2048,
+  "phase_bin_count": 256,
+  "selected_positive_offsets": {
+    "0": {
+      "frequency_offset_hz": 0.0,
+      "assumed_frequency_hz": 256000.0,
+      "estimated_hard_coverage": 0.015625,
+      "exact_256k_wrong_frequency_fold_rmse_mv": 8.188574485015687,
+      "exact_256k_wrong_frequency_ls_sample_rmse_mv": 6.0956060712831975e-12,
+      "exact_256k_wrong_frequency_ls_display_rmse_mv": 0.20705685467348267,
+      "nearby_true_frequency_hard_coverage": 0.015625,
+      "nearby_true_frequency_fold_rmse_mv": 8.188574485015687,
+      "nearby_true_frequency_ls_sample_rmse_mv": 6.0956060712831975e-12,
+      "nearby_true_frequency_ls_display_rmse_mv": 0.20705685467348267
+    },
+    "1": {
+      "frequency_offset_hz": 1.0,
+      "assumed_frequency_hz": 256001.0,
+      "estimated_hard_coverage": 0.03125,
+      "exact_256k_wrong_frequency_fold_rmse_mv": 8.177819722415597,
+      "exact_256k_wrong_frequency_ls_sample_rmse_mv": 0.14164956173624071,
+      "exact_256k_wrong_frequency_ls_display_rmse_mv": 0.19107087838661002,
+      "nearby_true_frequency_hard_coverage": 0.03125,
+      "nearby_true_frequency_fold_rmse_mv": 8.178159006706098,
+      "nearby_true_frequency_ls_sample_rmse_mv": 0.14238161653586656,
+      "nearby_true_frequency_ls_display_rmse_mv": 0.190525790730551
+    },
+    "10": {
+      "frequency_offset_hz": 10.0,
+      "assumed_frequency_hz": 256010.0,
+      "estimated_hard_coverage": 0.09375,
+      "exact_256k_wrong_frequency_fold_rmse_mv": 8.566097804427649,
+      "exact_256k_wrong_frequency_ls_sample_rmse_mv": 1.4161831293454803,
+      "exact_256k_wrong_frequency_ls_display_rmse_mv": 2.3150671090143504,
+      "nearby_true_frequency_hard_coverage": 0.09375,
+      "nearby_true_frequency_fold_rmse_mv": 6.919122768174003,
+      "nearby_true_frequency_ls_sample_rmse_mv": 0.23225700438400065,
+      "nearby_true_frequency_ls_display_rmse_mv": 0.0007964846361963743
+    },
+    "50": {
+      "frequency_offset_hz": 50.0,
+      "assumed_frequency_hz": 256050.0,
+      "estimated_hard_coverage": 0.421875,
+      "exact_256k_wrong_frequency_fold_rmse_mv": 15.131922734810795,
+      "exact_256k_wrong_frequency_ls_sample_rmse_mv": 7.037542453304616,
+      "exact_256k_wrong_frequency_ls_display_rmse_mv": 11.967392247057084,
+      "nearby_true_frequency_hard_coverage": 0.421875,
+      "nearby_true_frequency_fold_rmse_mv": 2.5215593710290984,
+      "nearby_true_frequency_ls_sample_rmse_mv": 0.23304654183799262,
+      "nearby_true_frequency_ls_display_rmse_mv": 0.00204905336659164
+    },
+    "100": {
+      "frequency_offset_hz": 100.0,
+      "assumed_frequency_hz": 256100.0,
+      "estimated_hard_coverage": 0.8203125,
+      "exact_256k_wrong_frequency_fold_rmse_mv": 27.330904980240174,
+      "exact_256k_wrong_frequency_ls_sample_rmse_mv": 13.80292244881524,
+      "exact_256k_wrong_frequency_ls_display_rmse_mv": 23.291001858378344,
+      "nearby_true_frequency_hard_coverage": 0.8203125,
+      "nearby_true_frequency_fold_rmse_mv": 0.23511971139882118,
+      "nearby_true_frequency_ls_sample_rmse_mv": 0.22759897998651607,
+      "nearby_true_frequency_ls_display_rmse_mv": 0.012218943608568185
+    },
+    "250": {
+      "frequency_offset_hz": 250.0,
+      "assumed_frequency_hz": 256250.0,
+      "estimated_hard_coverage": 1.0,
+      "exact_256k_wrong_frequency_fold_rmse_mv": 47.52756773039059,
+      "exact_256k_wrong_frequency_ls_sample_rmse_mv": 30.124110017543746,
+      "exact_256k_wrong_frequency_ls_display_rmse_mv": 46.08220335677326,
+      "nearby_true_frequency_hard_coverage": 1.0,
+      "nearby_true_frequency_fold_rmse_mv": 0.06360957667773967,
+      "nearby_true_frequency_ls_sample_rmse_mv": 0.22829995921991764,
+      "nearby_true_frequency_ls_display_rmse_mv": 0.007457655815463154
+    },
+    "500": {
+      "frequency_offset_hz": 500.0,
+      "assumed_frequency_hz": 256500.0,
+      "estimated_hard_coverage": 1.0,
+      "exact_256k_wrong_frequency_fold_rmse_mv": 38.87384730755276,
+      "exact_256k_wrong_frequency_ls_sample_rmse_mv": 39.04770380173212,
+      "exact_256k_wrong_frequency_ls_display_rmse_mv": 38.87384730755511,
+      "nearby_true_frequency_hard_coverage": 1.0,
+      "nearby_true_frequency_fold_rmse_mv": 0.06237737783173071,
+      "nearby_true_frequency_ls_sample_rmse_mv": 0.22817327765179424,
+      "nearby_true_frequency_ls_display_rmse_mv": 0.007668540145476299
+    }
+  },
+  "false_confidence_point_count": 804,
+  "conclusion": "Coverage computed only from an assumed frequency can become high even when exact-256 kHz ADC values contain only four physical phases. Use fit residual and estimate stability as guardrails."
+}

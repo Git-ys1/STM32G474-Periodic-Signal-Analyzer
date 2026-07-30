@@ -1,0 +1,210 @@
+{
+  "schema_version": 1,
+  "groups": [
+    {
+      "group_number": 101,
+      "name": "pure_10k",
+      "requirement": 2,
+      "fundamental_hz": 10000.0,
+      "tones": [
+        {
+          "order": 1,
+          "amplitude_mvpk": 50.0,
+          "relative_phase_deg": 0.0
+        }
+      ],
+      "sample_rate_hz": 1024000.0,
+      "sample_count": 2048,
+      "adc_vref_v": 3.3,
+      "adc_bias_v": 1.65,
+      "start_phase_deg": 0.0,
+      "noise_rms_mv": 0.0,
+      "random_seed": 1
+    },
+    {
+      "group_number": 102,
+      "name": "official_10p5k_1_3_4",
+      "requirement": 1,
+      "fundamental_hz": 10500.0,
+      "tones": [
+        {
+          "order": 1,
+          "amplitude_mvpk": 50.0,
+          "relative_phase_deg": 0.0
+        },
+        {
+          "order": 3,
+          "amplitude_mvpk": 25.0,
+          "relative_phase_deg": 0.0
+        },
+        {
+          "order": 4,
+          "amplitude_mvpk": 15.0,
+          "relative_phase_deg": 0.0
+        }
+      ],
+      "sample_rate_hz": 1024000.0,
+      "sample_count": 2048,
+      "adc_vref_v": 3.3,
+      "adc_bias_v": 1.65,
+      "start_phase_deg": 0.0,
+      "noise_rms_mv": 0.0,
+      "random_seed": 1
+    },
+    {
+      "group_number": 103,
+      "name": "coherent_128k_1_2_3",
+      "requirement": 2,
+      "fundamental_hz": 128000.0,
+      "tones": [
+        {
+          "order": 1,
+          "amplitude_mvpk": 55.0,
+          "relative_phase_deg": 0.0
+        },
+        {
+          "order": 2,
+          "amplitude_mvpk": 20.0,
+          "relative_phase_deg": 0.0
+        },
+        {
+          "order": 3,
+          "amplitude_mvpk": 10.0,
+          "relative_phase_deg": 0.0
+        }
+      ],
+      "sample_rate_hz": 1024000.0,
+      "sample_count": 2048,
+      "adc_vref_v": 3.3,
+      "adc_bias_v": 1.65,
+      "start_phase_deg": 0.0,
+      "noise_rms_mv": 0.0,
+      "random_seed": 1
+    },
+    {
+      "group_number": 104,
+      "name": "coherent_160k_1_2_3",
+      "requirement": 2,
+      "fundamental_hz": 160000.0,
+      "tones": [
+        {
+          "order": 1,
+          "amplitude_mvpk": 55.0,
+          "relative_phase_deg": 0.0
+        },
+        {
+          "order": 2,
+          "amplitude_mvpk": 20.0,
+          "relative_phase_deg": 0.0
+        },
+        {
+          "order": 3,
+          "amplitude_mvpk": 10.0,
+          "relative_phase_deg": 0.0
+        }
+      ],
+      "sample_rate_hz": 1024000.0,
+      "sample_count": 2048,
+      "adc_vref_v": 3.3,
+      "adc_bias_v": 1.65,
+      "start_phase_deg": 0.0,
+      "noise_rms_mv": 0.0,
+      "random_seed": 1
+    },
+    {
+      "group_number": 105,
+      "name": "coherent_200k_1_2",
+      "requirement": 2,
+      "fundamental_hz": 200000.0,
+      "tones": [
+        {
+          "order": 1,
+          "amplitude_mvpk": 55.0,
+          "relative_phase_deg": 0.0
+        },
+        {
+          "order": 2,
+          "amplitude_mvpk": 15.0,
+          "relative_phase_deg": 0.0
+        }
+      ],
+      "sample_rate_hz": 1024000.0,
+      "sample_count": 2048,
+      "adc_vref_v": 3.3,
+      "adc_bias_v": 1.65,
+      "start_phase_deg": 0.0,
+      "noise_rms_mv": 0.0,
+      "random_seed": 1
+    },
+    {
+      "group_number": 106,
+      "name": "boundary_250k_1_2",
+      "requirement": 2,
+      "fundamental_hz": 250000.0,
+      "tones": [
+        {
+          "order": 1,
+          "amplitude_mvpk": 55.0,
+          "relative_phase_deg": 0.0
+        },
+        {
+          "order": 2,
+          "amplitude_mvpk": 15.0,
+          "relative_phase_deg": 0.0
+        }
+      ],
+      "sample_rate_hz": 1024000.0,
+      "sample_count": 2048,
+      "adc_vref_v": 3.3,
+      "adc_bias_v": 1.65,
+      "start_phase_deg": 0.0,
+      "noise_rms_mv": 0.0,
+      "random_seed": 1
+    },
+    {
+      "group_number": 107,
+      "name": "half_grid_249p75k_1_2",
+      "requirement": 2,
+      "fundamental_hz": 249750.0,
+      "tones": [
+        {
+          "order": 1,
+          "amplitude_mvpk": 55.0,
+          "relative_phase_deg": 0.0
+        },
+        {
+          "order": 2,
+          "amplitude_mvpk": 15.0,
+          "relative_phase_deg": 0.0
+        }
+      ],
+      "sample_rate_hz": 1024000.0,
+      "sample_count": 2048,
+      "adc_vref_v": 3.3,
+      "adc_bias_v": 1.65,
+      "start_phase_deg": 37.0,
+      "noise_rms_mv": 0.0,
+      "random_seed": 1
+    },
+    {
+      "group_number": 108,
+      "name": "exact_256k_pure",
+      "requirement": 2,
+      "fundamental_hz": 256000.0,
+      "tones": [
+        {
+          "order": 1,
+          "amplitude_mvpk": 55.0,
+          "relative_phase_deg": 0.0
+        }
+      ],
+      "sample_rate_hz": 1024000.0,
+      "sample_count": 2048,
+      "adc_vref_v": 3.3,
+      "adc_bias_v": 1.65,
+      "start_phase_deg": 23.0,
+      "noise_rms_mv": 0.0,
+      "random_seed": 1
+    }
+  ]
+}

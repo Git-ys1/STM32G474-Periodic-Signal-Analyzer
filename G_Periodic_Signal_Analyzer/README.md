@@ -4,7 +4,8 @@
 
 ## 当前冻结版本
 
-当前阶段基线为 **V1.4.1实体按键兼容版（2026-07-30）**：
+稳定融合主链仍以 **V1.4.1实体按键兼容版（2026-07-30）** 为底座；
+最新离线验证与测试固件为 **V1.8自定义波形实验室与时域方向修复版（2026-07-31）**：
 
 - ADC2、TIM3、DMA、2048点FFT、Vpp与RMS沿用队友工程；
 - `AnalyzerBridge`把真实结果和测试结果统一成稳定快照；
@@ -14,6 +15,8 @@
 - KEY1与原HMI按钮共用同一个按钮命令处理入口，不维护第二套显示逻辑；
 - 已通过Keil Clean Build、ST-Link运行态检查和HMI模拟器实测；
 - 已验证1T、3T、刷新、测试按钮、复合时域波形、三根频谱线和六项文本。
+- 已修复时域整周期左右镜像，并发布64/128/256槽、精确256 kHz谐波最小
+  二乘与频率误估敏感性实验；自适应算法当前仍限于PC离线验证。
 
 冻结说明见：
 
@@ -24,6 +27,8 @@
 - [不可触摸屏KEY1实体按键控制](docs/KEY1_PHYSICAL_CONTROL.md)
 - [V1.6原生ADC测试集与波形提取验证](docs/V1.6_NATIVE_ADC_TEST_DATASET.md)
 - [V1.7相位折叠、等效采样边界与测试编号](docs/V1.7_PHASE_FOLDING_AND_TEST_ID.md)
+- [V1.8波形实验室与时域方向修复发布说明](docs/V1.8_WAVEFORM_LAB_AND_TIME_DIRECTION_RELEASE.md)
+- [自定义周期波形实验室与相位覆盖扫描](docs/CUSTOM_WAVEFORM_LAB.md)
 - [当前开发状态](docs/CURRENT_STATUS.md)
 
 ## 目录

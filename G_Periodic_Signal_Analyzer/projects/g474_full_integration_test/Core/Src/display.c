@@ -431,24 +431,24 @@ static void Display_UpdateResultTexts(const AnalyzerResult *result)
         }
 
         /*
-         * 原生ADC测试模式在“谐波2”末尾显示[T1]~[T9]，便于把屏幕
-         * 波形与生成器manifest、CSV和SVG中的同一测试向量对应起来。
+         * 测试编号放在“谐波2”文本最前面，避免较长分量文本把末尾编号
+         * 裁出控件可视区域。原T1~T9和自定义T1~T255共用该字段；
          * 真实ADC结果test_case_number为0，不显示任何测试标记。
          */
         if ((i == (ANALYZER_MAX_COMPONENTS - 1U)) &&
             (result->source == ANALYZER_SOURCE_TEST) &&
             (result->test_case_number != 0U))
         {
-            size_t used = strlen(text);
-            if (used < sizeof(text))
-            {
-                (void)snprintf(
-                    &text[used],
-                    sizeof(text) - used,
-                    " [T%u]",
-                    (unsigned int)result->test_case_number
-                );
-            }
+            char numbered_text[64];
+
+            (void)snprintf(
+                numbered_text,
+                sizeof(numbered_text),
+                "[T%u] %s",
+                (unsigned int)result->test_case_number,
+                text
+            );
+            (void)snprintf(text, sizeof(text), "%s", numbered_text);
         }
 
         (void)TJC_SetText(object_names[i], text);
@@ -612,7 +612,14 @@ static HAL_StatusTypeDef Display_DrawTimeResult(
             (result->waveform_mv[index1] -
              result->waveform_mv[index0]);
 
-        s_curve_buffer[i] = Display_MapToByte(
+        /*
+         * 淘晶驰addt整帧写入方向与逻辑横坐标相反。频谱路径已经
+         * 使用相同补偿；时域也必须反向写入，否则一个周期会显示成
+         * x -> 1-x 的左右镜像。这里只反转横轴，不改变电压纵轴。
+         */
+        s_curve_buffer[
+            (DISPLAY_CURVE_WIDTH - 1U) - i
+        ] = Display_MapToByte(
             sample_mv,
             -full_scale_mv,
             full_scale_mv,

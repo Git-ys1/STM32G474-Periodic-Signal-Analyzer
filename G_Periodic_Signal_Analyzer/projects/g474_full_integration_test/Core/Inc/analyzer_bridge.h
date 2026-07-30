@@ -14,6 +14,17 @@ extern "C" {
 #define ANALYZER_TEST_ENABLE          1U
 #endif
 
+/*
+ * 0：测试按钮使用原T1~T9固定回归集。
+ * 1：测试按钮使用自定义波形实验室导出的generated_custom_adc_tests.h。
+ *
+ * 自定义工具会直接生成2048点uint16_t数组和用户填写的1~255组号，
+ * 不需要手工粘贴数组。正式比赛可同时将ANALYZER_TEST_ENABLE设为0。
+ */
+#ifndef ANALYZER_CUSTOM_TEST_ENABLE
+#define ANALYZER_CUSTOM_TEST_ENABLE   1U
+#endif
+
 #define ANALYZER_DISPLAY_POINT_COUNT  256U
 #define ANALYZER_MAX_COMPONENTS       3U
 
