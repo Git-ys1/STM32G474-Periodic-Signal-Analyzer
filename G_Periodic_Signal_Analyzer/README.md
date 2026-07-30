@@ -43,3 +43,6 @@ G_Periodic_Signal_Analyzer/
 
 当前显示冻结基线及本次故障复盘见
 [docs/DISPLAY_BASELINE_FREEZE_2026-07-30.md](docs/DISPLAY_BASELINE_FREEZE_2026-07-30.md)。
+
+当前显示代码入口、函数职责、数据流和后续接入边界见
+[docs/CURRENT_DISPLAY_BASELINE_PATH.md](docs/CURRENT_DISPLAY_BASELINE_PATH.md)。
