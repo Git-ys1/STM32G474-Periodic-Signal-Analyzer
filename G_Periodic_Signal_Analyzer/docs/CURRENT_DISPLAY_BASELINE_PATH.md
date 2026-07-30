@@ -2,6 +2,11 @@
 
 更新时间：2026-07-30
 
+> 历史说明：本文记录V1.3之前的time/spectrum双页面冻结基线，现已由
+> `docs/DISPLAY_ARCHITECTURE.md`、`docs/HMI_LAYOUT.md`和
+> `docs/HMI_PROTOCOL.md`中的dashboard单页面基线取代。本文仅用于追溯
+> 旧版故障与迁移来源，不再作为当前实现任务书。
+
 本文说明当前已验证的淘晶驰显示代码从哪里进入、各函数负责什么、数据如何流动，以及后续接入真实信号时允许修改的边界。
 
 故障根因、HMI数字ID和回归要求见：
