@@ -46,3 +46,6 @@ G_Periodic_Signal_Analyzer/
 
 当前显示代码入口、函数职责、数据流和后续接入边界见
 [docs/CURRENT_DISPLAY_BASELINE_PATH.md](docs/CURRENT_DISPLAY_BASELINE_PATH.md)。
+
+当前已验证的dashboard单页面V1.3.1故障复盘、修改清单、HMI配套要求与截图证据见
+[docs/DASHBOARD_V1.3.1_RELEASE.md](docs/DASHBOARD_V1.3.1_RELEASE.md)。

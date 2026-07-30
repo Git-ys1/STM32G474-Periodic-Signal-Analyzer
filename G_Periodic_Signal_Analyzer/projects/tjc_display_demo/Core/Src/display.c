@@ -3,7 +3,6 @@
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -47,7 +46,8 @@ typedef enum
     UI_ACTION_NONE = 0,
     UI_ACTION_DRAW_DASHBOARD,
     UI_ACTION_DRAW_TIME_1,
-    UI_ACTION_DRAW_TIME_3
+    UI_ACTION_DRAW_TIME_3,
+    UI_ACTION_RELOAD_DASHBOARD
 } UI_Action;
 
 /**
@@ -164,37 +164,6 @@ static HAL_StatusTypeDef TJC_SetText(const char *object_name,
     }
 
     return TJC_SendCommand(command);
-}
-
-/**
- * @brief 使用printf风格格式更新文本控件。
- * @param object_name 文本控件完整名称。
- * @param format printf格式字符串。
- * @return 格式化或串口发送状态。
- */
-static HAL_StatusTypeDef TJC_SetTextFormat(const char *object_name,
-                                           const char *format,
-                                           ...)
-{
-    char text[64];
-    va_list arguments;
-    int length;
-
-    if ((object_name == NULL) || (format == NULL))
-    {
-        return HAL_ERROR;
-    }
-
-    va_start(arguments, format);
-    length = vsnprintf(text, sizeof(text), format, arguments);
-    va_end(arguments);
-
-    if ((length < 0) || ((size_t)length >= sizeof(text)))
-    {
-        return HAL_ERROR;
-    }
-
-    return TJC_SetText(object_name, text);
 }
 
 /**
@@ -459,6 +428,26 @@ static void Demo_PrepareInputData(void)
 }
 
 /**
+ * @brief 将非负浮点数四舍五入为指定倍率的无符号定点整数。
+ * @param value 原始数值。
+ * @param scale 定点倍率，例如10表示保留1位小数，100表示保留2位小数。
+ * @return 四舍五入后的定点整数；负数按0处理。
+ *
+ * @note 当前工程使用newlib-nano且未链接_printf_float，不能依赖printf的%f。
+ *       先转成定点整数再使用%lu，可保证淘晶驰文本中的数值稳定显示。
+ */
+static uint32_t Display_ToUnsignedFixed(float value,
+                                        uint32_t scale)
+{
+    if ((value <= 0.0f) || (scale == 0U))
+    {
+        return 0U;
+    }
+
+    return (uint32_t)(value * (float)scale + 0.5f);
+}
+
+/**
  * @brief 更新dashboard页面中的全部六项测量结果。
  * @param vpp_mv 峰峰值，单位mV。
  * @param rms_mv 真有效值，单位mV。
@@ -476,22 +465,56 @@ static void Display_UpdateResultTexts(
     const SpectrumPeak *peaks,
     uint8_t peak_count)
 {
-    (void)TJC_SetTextFormat("t_vpp", "Upp: %.1f mV", vpp_mv);
-    (void)TJC_SetTextFormat("t_rms", "Urms: %.2f mV", rms_mv);
-    (void)TJC_SetTextFormat(
-        "t_freq",
-        "f1: %.1f kHz",
-        fundamental_hz / 1000.0f
+    char text[64];
+    uint32_t vpp_x10 = Display_ToUnsignedFixed(vpp_mv, 10U);
+    uint32_t rms_x100 = Display_ToUnsignedFixed(rms_mv, 100U);
+    uint32_t fundamental_khz_x10 =
+        Display_ToUnsignedFixed(fundamental_hz / 1000.0f, 10U);
+
+    (void)snprintf(
+        text,
+        sizeof(text),
+        "Upp: %lu.%01lu mV",
+        (unsigned long)(vpp_x10 / 10U),
+        (unsigned long)(vpp_x10 % 10U)
     );
+    (void)TJC_SetText("t_vpp", text);
+
+    (void)snprintf(
+        text,
+        sizeof(text),
+        "Urms: %lu.%02lu mV",
+        (unsigned long)(rms_x100 / 100U),
+        (unsigned long)(rms_x100 % 100U)
+    );
+    (void)TJC_SetText("t_rms", text);
+
+    (void)snprintf(
+        text,
+        sizeof(text),
+        "f1: %lu.%01lu kHz",
+        (unsigned long)(fundamental_khz_x10 / 10U),
+        (unsigned long)(fundamental_khz_x10 % 10U)
+    );
+    (void)TJC_SetText("t_freq", text);
 
     if ((peaks != NULL) && (peak_count >= 1U))
     {
-        (void)TJC_SetTextFormat(
-            "t_c1",
-            "基波: %.1f kHz / %.1f mVpk",
-            peaks[0].frequency_hz / 1000.0f,
-            peaks[0].amplitude_mv
+        uint32_t frequency_khz_x10 =
+            Display_ToUnsignedFixed(peaks[0].frequency_hz / 1000.0f, 10U);
+        uint32_t amplitude_mv_x10 =
+            Display_ToUnsignedFixed(peaks[0].amplitude_mv, 10U);
+
+        (void)snprintf(
+            text,
+            sizeof(text),
+            "基波: %lu.%01lu kHz / %lu.%01lu mVpk",
+            (unsigned long)(frequency_khz_x10 / 10U),
+            (unsigned long)(frequency_khz_x10 % 10U),
+            (unsigned long)(amplitude_mv_x10 / 10U),
+            (unsigned long)(amplitude_mv_x10 % 10U)
         );
+        (void)TJC_SetText("t_c1", text);
     }
     else
     {
@@ -503,12 +526,21 @@ static void Display_UpdateResultTexts(
 
     if ((peaks != NULL) && (peak_count >= 2U))
     {
-        (void)TJC_SetTextFormat(
-            "t_c2",
-            "谐波1: %.1f kHz / %.1f mVpk",
-            peaks[1].frequency_hz / 1000.0f,
-            peaks[1].amplitude_mv
+        uint32_t frequency_khz_x10 =
+            Display_ToUnsignedFixed(peaks[1].frequency_hz / 1000.0f, 10U);
+        uint32_t amplitude_mv_x10 =
+            Display_ToUnsignedFixed(peaks[1].amplitude_mv, 10U);
+
+        (void)snprintf(
+            text,
+            sizeof(text),
+            "谐波1: %lu.%01lu kHz / %lu.%01lu mVpk",
+            (unsigned long)(frequency_khz_x10 / 10U),
+            (unsigned long)(frequency_khz_x10 % 10U),
+            (unsigned long)(amplitude_mv_x10 / 10U),
+            (unsigned long)(amplitude_mv_x10 % 10U)
         );
+        (void)TJC_SetText("t_c2", text);
     }
     else
     {
@@ -520,12 +552,21 @@ static void Display_UpdateResultTexts(
 
     if ((peaks != NULL) && (peak_count >= 3U))
     {
-        (void)TJC_SetTextFormat(
-            "t_c3",
-            "谐波2: %.1f kHz / %.1f mVpk",
-            peaks[2].frequency_hz / 1000.0f,
-            peaks[2].amplitude_mv
+        uint32_t frequency_khz_x10 =
+            Display_ToUnsignedFixed(peaks[2].frequency_hz / 1000.0f, 10U);
+        uint32_t amplitude_mv_x10 =
+            Display_ToUnsignedFixed(peaks[2].amplitude_mv, 10U);
+
+        (void)snprintf(
+            text,
+            sizeof(text),
+            "谐波2: %lu.%01lu kHz / %lu.%01lu mVpk",
+            (unsigned long)(frequency_khz_x10 / 10U),
+            (unsigned long)(frequency_khz_x10 % 10U),
+            (unsigned long)(amplitude_mv_x10 / 10U),
+            (unsigned long)(amplitude_mv_x10 % 10U)
         );
+        (void)TJC_SetText("t_c3", text);
     }
     else
     {
@@ -534,6 +575,29 @@ static void Display_UpdateResultTexts(
             "谐波2: --.- kHz / --.- mVpk"
         );
     }
+}
+
+/**
+ * @brief 在频谱发送失败时，将真实曲线ID和返回状态显示到t_c3。
+ * @param hal_status 频谱绘制函数返回的HAL状态。
+ *
+ * @note 该诊断只在频谱失败时覆盖“谐波2”占位文本。这样即使频谱
+ *       addt失败，现场也能直接看到动态上报的频谱ID和HMI状态码，
+ *       不再因为提前return而丢失全部测量文本。
+ */
+static void Display_ShowSpectrumError(HAL_StatusTypeDef hal_status)
+{
+    char text[64];
+
+    (void)snprintf(
+        text,
+        sizeof(text),
+        "频谱错误: ID=%u HAL=%u HMI=%02X",
+        (unsigned int)s_dashboard.spectrum_curve_id,
+        (unsigned int)hal_status,
+        (unsigned int)s_last_hmi_status
+    );
+    (void)TJC_SetText("t_c3", text);
 }
 
 /**
@@ -732,31 +796,23 @@ static HAL_StatusTypeDef Display_DrawDemoSpectrum(void)
 /**
  * @brief 在dashboard页面首次就绪后完成整页初始化显示。
  *
- * 严格按“时域曲线 -> 频谱曲线 -> 六项文本”的顺序执行。
- * 任一曲线发送失败时停止后续步骤，避免屏幕显示半套不一致数据。
+ * 按“时域曲线 -> 频谱曲线 -> 六项文本”的顺序执行。
+ * 曲线失败时仍更新结果文本，并在t_c3显示频谱诊断信息，避免
+ * 一个曲线错误把所有测量数值一起挡住。
  */
 static HAL_StatusTypeDef Display_DrawDashboard(void)
 {
-    HAL_StatusTypeDef status;
+    HAL_StatusTypeDef time_status;
+    HAL_StatusTypeDef spectrum_status;
 
-    status = Display_DrawTimeFrame(
+    time_status = Display_DrawTimeFrame(
         s_demo_one_period_mv,
         DEMO_PERIOD_SAMPLE_COUNT,
         s_visible_periods,
         DEMO_TIME_FULL_SCALE_MV
     );
 
-    if (status != HAL_OK)
-    {
-        return status;
-    }
-
-    status = Display_DrawDemoSpectrum();
-
-    if (status != HAL_OK)
-    {
-        return status;
-    }
+    spectrum_status = Display_DrawDemoSpectrum();
 
     Display_UpdateResultTexts(
         2.0f * DEMO_SIGNAL_PEAK_MV,
@@ -765,6 +821,17 @@ static HAL_StatusTypeDef Display_DrawDashboard(void)
         s_demo_peaks,
         (uint8_t)(sizeof(s_demo_peaks) / sizeof(s_demo_peaks[0]))
     );
+
+    if (spectrum_status != HAL_OK)
+    {
+        Display_ShowSpectrumError(spectrum_status);
+        return spectrum_status;
+    }
+
+    if (time_status != HAL_OK)
+    {
+        return time_status;
+    }
 
     return HAL_OK;
 }
@@ -803,6 +870,7 @@ static void TJC_ProcessCustomFrame(const uint8_t *frame,
     /*
      * 周期按钮：
      * A5 01 01 5A -> 1T
+     * A5 01 02 5A -> 重新加载dashboard并触发页面初始化帧
      * A5 01 03 5A -> 3T
      */
     if ((length == 4U) && (frame[1] == 0x01U))
@@ -814,6 +882,15 @@ static void TJC_ProcessCustomFrame(const uint8_t *frame,
                 s_dashboard.valid
                 ? UI_ACTION_DRAW_TIME_1
                 : UI_ACTION_NONE;
+        }
+        else if (frame[2] == 0x02U)
+        {
+            /*
+             * 刷新按钮不直接使用旧ID绘图，而是让页面重新初始化。
+             * dashboard的后初始化事件会再次上报两个真实曲线数字ID，
+             * MCU收到6字节帧后再执行完整页面刷新。
+             */
+            s_pending_action = UI_ACTION_RELOAD_DASHBOARD;
         }
         else if (frame[2] == 0x03U)
         {
@@ -1040,6 +1117,15 @@ void Display_Task(void)
                 3U,
                 DEMO_TIME_FULL_SCALE_MV
             );
+            break;
+
+        case UI_ACTION_RELOAD_DASHBOARD:
+            /*
+             * 解决MCU先上电、HMI模拟器后联机时首次page命令丢失的问题。
+             * 页面重新加载后，由A5 20 01 time_id spec_id 5A恢复有效状态。
+             */
+            s_dashboard.valid = false;
+            (void)TJC_SendCommand("page dashboard");
             break;
 
         case UI_ACTION_NONE:
