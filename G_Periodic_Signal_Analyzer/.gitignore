@@ -23,5 +23,11 @@ projects/g474_full_integration_test/ADC/MDK-ARM/ADC/
 projects/g474_full_integration_test/ADC/MDK-ARM/v14-*.log
 projects/g474_full_integration_test/ADC/MDK-ARM/*-build.log
 
+# Keil target outputs under archived teammate snapshots and future integration
+# projects.  Keep the project files, sources and linker scripts; omit
+# reproducible target objects and command-line build logs.
+projects/*/ADC/MDK-ARM/ADC/
+projects/*/ADC/MDK-ARM/*-build.log
+
 # Matplotlib SVG exports are reproducible from the committed scripts and data.
 tests/phase_coverage/*.svg
