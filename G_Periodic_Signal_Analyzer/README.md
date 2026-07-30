@@ -23,6 +23,7 @@
 - [队友工程双向融合速查](docs/TEAMMATE_INTEGRATION_QUICK_GUIDE.md)
 - [不可触摸屏KEY1实体按键控制](docs/KEY1_PHYSICAL_CONTROL.md)
 - [V1.6原生ADC测试集与波形提取验证](docs/V1.6_NATIVE_ADC_TEST_DATASET.md)
+- [V1.7相位折叠、等效采样边界与测试编号](docs/V1.7_PHASE_FOLDING_AND_TEST_ID.md)
 - [当前开发状态](docs/CURRENT_STATUS.md)
 
 ## 目录

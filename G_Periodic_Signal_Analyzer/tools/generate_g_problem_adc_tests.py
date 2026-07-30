@@ -583,7 +583,7 @@ def write_header(cases: Sequence[GeneratedCase]) -> None:
         ]
     )
 
-    for case in cases:
+    for test_number, case in enumerate(cases, start=1):
         frequencies = reported_component_frequencies(case)
         amplitudes = [amplitude for _, amplitude in case.tones_mvpk]
         while len(frequencies) < 3:

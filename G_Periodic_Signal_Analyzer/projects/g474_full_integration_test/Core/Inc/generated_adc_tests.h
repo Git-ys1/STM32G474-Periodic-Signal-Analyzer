@@ -1221,7 +1221,7 @@ static const GeneratedAdcTestCase s_generated_adc_test_cases[GENERATED_ADC_TEST_
 {
     {
         "q1_min_10k_100mVpp_1_3",
-        9U,
+        1U,
         1U,
         10000.0f,
         100.0f,
@@ -1236,7 +1236,7 @@ static const GeneratedAdcTestCase s_generated_adc_test_cases[GENERATED_ADC_TEST_
     },
     {
         "q1_official_10p5k_180mVpp_1_3_4",
-        9U,
+        2U,
         1U,
         10500.0f,
         180.0f,
@@ -1251,7 +1251,7 @@ static const GeneratedAdcTestCase s_generated_adc_test_cases[GENERATED_ADC_TEST_
     },
     {
         "q1_upper_49p75k_250mVpp_1_2_4",
-        9U,
+        3U,
         1U,
         50000.0f,
         250.0f,
@@ -1266,7 +1266,7 @@ static const GeneratedAdcTestCase s_generated_adc_test_cases[GENERATED_ADC_TEST_
     },
     {
         "q2_min_10k_50mVpp_1_4",
-        9U,
+        4U,
         2U,
         10000.0f,
         50.0f,
@@ -1281,7 +1281,7 @@ static const GeneratedAdcTestCase s_generated_adc_test_cases[GENERATED_ADC_TEST_
     },
     {
         "q2_mid_120p25k_180mVpp_1_2_4",
-        9U,
+        5U,
         2U,
         120500.0f,
         180.0f,
@@ -1296,7 +1296,7 @@ static const GeneratedAdcTestCase s_generated_adc_test_cases[GENERATED_ADC_TEST_
     },
     {
         "q2_upper_249p75k_250mVpp_1_2",
-        9U,
+        6U,
         2U,
         250000.0f,
         250.0f,
@@ -1311,7 +1311,7 @@ static const GeneratedAdcTestCase s_generated_adc_test_cases[GENERATED_ADC_TEST_
     },
     {
         "q3_low_20k_50mVpp_1_3_4_j1p1m",
-        9U,
+        7U,
         3U,
         20000.0f,
         50.0f,
@@ -1326,7 +1326,7 @@ static const GeneratedAdcTestCase s_generated_adc_test_cases[GENERATED_ADC_TEST_
     },
     {
         "q3_mid_80p25k_180mVpp_1_3_5_j1p25m",
-        9U,
+        8U,
         3U,
         80500.0f,
         180.0f,
