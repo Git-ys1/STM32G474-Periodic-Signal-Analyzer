@@ -11,23 +11,23 @@ extern "C" {
  * @brief 初始化显示模块。
  *
  * 初始化淘晶驰通信，等待屏幕启动后进入dashboard页面。
- * 页面上报两个曲线真实ID后，显示AnalyzerBridge中的最新稳定结果。
+ * 页面上报两个曲线真实ID后保持停止状态，直到收到刷新或测试命令。
  */
 void Display_Init(UART_HandleTypeDef *huart);
 
 /**
  * @brief 显示模块周期任务。
  *
- * 轮询dashboard页面、1T/3T、刷新和随机测试按钮事件；
- * 同时检测AnalyzerBridge的新结果并刷新dashboard。
+ * 处理dashboard页面、1T/3T、刷新、测试、清除和停止事件；
+ * 运行状态下每3秒刷新一次真实结果或随机测试结果。
  * 应在main()的while(1)中持续调用。
  */
 void Display_Task(void);
 
 /**
- * @brief 请求使用AnalyzerBridge的最新结果重绘当前dashboard。
+ * @brief 请求在当前运行模式下立即重绘dashboard。
  *
- * 该函数只安排主循环绘图，不在串口解析或ADC中断中执行耗时发送。
+ * 停止状态下不绘图；该函数只安排主循环动作，不执行耗时UART发送。
  */
 void Display_RedrawCurrentPage(void);
 
@@ -37,7 +37,7 @@ void Display_RedrawCurrentPage(void);
 void Display_TogglePeriods(void);
 
 /**
- * @brief 通过原HMI按钮命令处理入口，执行一次随机测试。
+ * @brief 通过原HMI按钮命令处理入口，启动随机测试自动刷新。
  */
 void Display_RequestTest(void);
 

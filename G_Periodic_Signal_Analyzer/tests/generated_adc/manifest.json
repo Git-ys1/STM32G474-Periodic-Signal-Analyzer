@@ -1,0 +1,315 @@
+{
+  "format": {
+    "c_type": "uint16_t",
+    "sample_count": 2048,
+    "sample_rate_hz": 1024000.0,
+    "adc_vref_v": 3.3,
+    "adc_code_count": 4096,
+    "adc_bias_v": 1.65,
+    "volts_per_code": 0.0008056640625,
+    "teammate_frequency_resolution_hz": 500.0
+  },
+  "phase_policy": "All measured components use zero relative phase, matching the official Q&A. Sampling starts at common phase zero.",
+  "q3_interference_model": {
+    "input_vpp_mv": 200.0,
+    "analog_attenuation_db": 40.0,
+    "adc_residual_vpp_mv": 2.0,
+    "note": "Compiled Q3 vectors model the ADC-side signal after ideal 40 dB analog suppression. Unfiltered 200 mVpp interference is evaluated offline because it aliases below Nyquist."
+  },
+  "cases": [
+    {
+      "test_number": 1,
+      "name": "q1_min_10k_100mVpp_1_3",
+      "requirement": 1,
+      "true_fundamental_hz": 10000.0,
+      "reported_fundamental_hz": 10000.0,
+      "target_vpp_mv": 100.0,
+      "expected_vrms_mv": 39.23135372335303,
+      "components": [
+        {
+          "harmonic": 1,
+          "true_frequency_hz": 10000.0,
+          "reported_frequency_hz": 10000.0,
+          "amplitude_mvpk": 52.36668920244586,
+          "relative_phase_rad": 0.0
+        },
+        {
+          "harmonic": 3,
+          "true_frequency_hz": 30000.0,
+          "reported_frequency_hz": 30000.0,
+          "amplitude_mvpk": 18.32834122085605,
+          "relative_phase_rad": 0.0
+        }
+      ],
+      "interference_hz": 0.0,
+      "adc_code_min": 1986,
+      "adc_code_max": 2110
+    },
+    {
+      "test_number": 2,
+      "name": "q1_official_10p5k_180mVpp_1_3_4",
+      "requirement": 1,
+      "true_fundamental_hz": 10500.0,
+      "reported_fundamental_hz": 10500.0,
+      "target_vpp_mv": 180.0,
+      "expected_vrms_mv": 58.295080348160944,
+      "components": [
+        {
+          "harmonic": 1,
+          "true_frequency_hz": 10500.0,
+          "reported_frequency_hz": 10500.0,
+          "amplitude_mvpk": 71.21877574840991,
+          "relative_phase_rad": 0.0
+        },
+        {
+          "harmonic": 3,
+          "true_frequency_hz": 31500.0,
+          "reported_frequency_hz": 31500.0,
+          "amplitude_mvpk": 35.609387874204955,
+          "relative_phase_rad": 0.0
+        },
+        {
+          "harmonic": 4,
+          "true_frequency_hz": 42000.0,
+          "reported_frequency_hz": 42000.0,
+          "amplitude_mvpk": 21.36563272452297,
+          "relative_phase_rad": 0.0
+        }
+      ],
+      "interference_hz": 0.0,
+      "adc_code_min": 1936,
+      "adc_code_max": 2160
+    },
+    {
+      "test_number": 3,
+      "name": "q1_upper_49p75k_250mVpp_1_2_4",
+      "requirement": 1,
+      "true_fundamental_hz": 49750.0,
+      "reported_fundamental_hz": 50000.0,
+      "target_vpp_mv": 250.0,
+      "expected_vrms_mv": 89.98951281263834,
+      "components": [
+        {
+          "harmonic": 1,
+          "true_frequency_hz": 49750.0,
+          "reported_frequency_hz": 50000.0,
+          "amplitude_mvpk": 118.03489490427856,
+          "relative_phase_rad": 0.0
+        },
+        {
+          "harmonic": 2,
+          "true_frequency_hz": 99500.0,
+          "reported_frequency_hz": 99500.0,
+          "amplitude_mvpk": 41.31221321649749,
+          "relative_phase_rad": 0.0
+        },
+        {
+          "harmonic": 4,
+          "true_frequency_hz": 199000.0,
+          "reported_frequency_hz": 199000.0,
+          "amplitude_mvpk": 23.606978980855715,
+          "relative_phase_rad": 0.0
+        }
+      ],
+      "interference_hz": 0.0,
+      "adc_code_min": 1893,
+      "adc_code_max": 2203
+    },
+    {
+      "test_number": 4,
+      "name": "q2_min_10k_50mVpp_1_4",
+      "requirement": 2,
+      "true_fundamental_hz": 10000.0,
+      "reported_fundamental_hz": 10000.0,
+      "target_vpp_mv": 50.0,
+      "expected_vrms_mv": 14.923387778051643,
+      "components": [
+        {
+          "harmonic": 1,
+          "true_frequency_hz": 10000.0,
+          "reported_frequency_hz": 10000.0,
+          "amplitude_mvpk": 20.214787156163503,
+          "relative_phase_rad": 0.0
+        },
+        {
+          "harmonic": 4,
+          "true_frequency_hz": 40000.0,
+          "reported_frequency_hz": 40000.0,
+          "amplitude_mvpk": 6.064436146849051,
+          "relative_phase_rad": 0.0
+        }
+      ],
+      "interference_hz": 0.0,
+      "adc_code_min": 2017,
+      "adc_code_max": 2079
+    },
+    {
+      "test_number": 5,
+      "name": "q2_mid_120p25k_180mVpp_1_2_4",
+      "requirement": 2,
+      "true_fundamental_hz": 120250.0,
+      "reported_fundamental_hz": 120500.0,
+      "target_vpp_mv": 180.0,
+      "expected_vrms_mv": 65.44241566097867,
+      "components": [
+        {
+          "harmonic": 1,
+          "true_frequency_hz": 120250.0,
+          "reported_frequency_hz": 120500.0,
+          "amplitude_mvpk": 86.7643574917837,
+          "relative_phase_rad": 0.0
+        },
+        {
+          "harmonic": 2,
+          "true_frequency_hz": 240500.0,
+          "reported_frequency_hz": 240500.0,
+          "amplitude_mvpk": 28.63223797228862,
+          "relative_phase_rad": 0.0
+        },
+        {
+          "harmonic": 4,
+          "true_frequency_hz": 481000.0,
+          "reported_frequency_hz": 481000.0,
+          "amplitude_mvpk": 14.74994077360323,
+          "relative_phase_rad": 0.0
+        }
+      ],
+      "interference_hz": 0.0,
+      "adc_code_min": 1936,
+      "adc_code_max": 2160
+    },
+    {
+      "test_number": 6,
+      "name": "q2_upper_249p75k_250mVpp_1_2",
+      "requirement": 2,
+      "true_fundamental_hz": 249750.0,
+      "reported_fundamental_hz": 250000.0,
+      "target_vpp_mv": 250.0,
+      "expected_vrms_mv": 82.12553900335152,
+      "components": [
+        {
+          "harmonic": 1,
+          "true_frequency_hz": 249750.0,
+          "reported_frequency_hz": 250000.0,
+          "amplitude_mvpk": 112.12787924558388,
+          "relative_phase_rad": 0.0
+        },
+        {
+          "harmonic": 2,
+          "true_frequency_hz": 499500.0,
+          "reported_frequency_hz": 499500.0,
+          "amplitude_mvpk": 30.27452739630765,
+          "relative_phase_rad": 0.0
+        }
+      ],
+      "interference_hz": 0.0,
+      "adc_code_min": 1893,
+      "adc_code_max": 2203
+    },
+    {
+      "test_number": 7,
+      "name": "q3_low_20k_50mVpp_1_3_4_j1p1m",
+      "requirement": 3,
+      "true_fundamental_hz": 20000.0,
+      "reported_fundamental_hz": 20000.0,
+      "target_vpp_mv": 50.0,
+      "expected_vrms_mv": 17.77600935078295,
+      "components": [
+        {
+          "harmonic": 1,
+          "true_frequency_hz": 20000.0,
+          "reported_frequency_hz": 20000.0,
+          "amplitude_mvpk": 22.94872939253656,
+          "relative_phase_rad": 0.0
+        },
+        {
+          "harmonic": 3,
+          "true_frequency_hz": 60000.0,
+          "reported_frequency_hz": 60000.0,
+          "amplitude_mvpk": 9.179491757014624,
+          "relative_phase_rad": 0.0
+        },
+        {
+          "harmonic": 4,
+          "true_frequency_hz": 80000.0,
+          "reported_frequency_hz": 80000.0,
+          "amplitude_mvpk": 4.589745878507312,
+          "relative_phase_rad": 0.0
+        }
+      ],
+      "interference_hz": 1100000.0,
+      "adc_code_min": 2016,
+      "adc_code_max": 2080
+    },
+    {
+      "test_number": 8,
+      "name": "q3_mid_80p25k_180mVpp_1_3_5_j1p25m",
+      "requirement": 3,
+      "true_fundamental_hz": 80250.0,
+      "reported_fundamental_hz": 80500.0,
+      "target_vpp_mv": 180.0,
+      "expected_vrms_mv": 70.15210303320939,
+      "components": [
+        {
+          "harmonic": 1,
+          "true_frequency_hz": 80250.0,
+          "reported_frequency_hz": 80500.0,
+          "amplitude_mvpk": 90.85413733203855,
+          "relative_phase_rad": 0.0
+        },
+        {
+          "harmonic": 3,
+          "true_frequency_hz": 240750.0,
+          "reported_frequency_hz": 241000.0,
+          "amplitude_mvpk": 36.34165493281542,
+          "relative_phase_rad": 0.0
+        },
+        {
+          "harmonic": 5,
+          "true_frequency_hz": 401250.0,
+          "reported_frequency_hz": 401500.0,
+          "amplitude_mvpk": 16.353744719766937,
+          "relative_phase_rad": 0.0
+        }
+      ],
+      "interference_hz": 1250000.0,
+      "adc_code_min": 1935,
+      "adc_code_max": 2161
+    },
+    {
+      "test_number": 9,
+      "name": "q3_upper_124p75k_250mVpp_1_2_4_j1p3m",
+      "requirement": 3,
+      "true_fundamental_hz": 124750.0,
+      "reported_fundamental_hz": 125000.0,
+      "target_vpp_mv": 250.0,
+      "expected_vrms_mv": 91.29044743439779,
+      "components": [
+        {
+          "harmonic": 1,
+          "true_frequency_hz": 124750.0,
+          "reported_frequency_hz": 125000.0,
+          "amplitude_mvpk": 121.55862631905411,
+          "relative_phase_rad": 0.0
+        },
+        {
+          "harmonic": 2,
+          "true_frequency_hz": 249500.0,
+          "reported_frequency_hz": 249500.0,
+          "amplitude_mvpk": 38.89876042209732,
+          "relative_phase_rad": 0.0
+        },
+        {
+          "harmonic": 4,
+          "true_frequency_hz": 499000.0,
+          "reported_frequency_hz": 499000.0,
+          "amplitude_mvpk": 19.44938021104866,
+          "relative_phase_rad": 0.0
+        }
+      ],
+      "interference_hz": 1300000.0,
+      "adc_code_min": 1892,
+      "adc_code_max": 2204
+    }
+  ]
+}

@@ -20,7 +20,9 @@
 #define DISPLAY_CURVE_Y_MAX          (DISPLAY_CURVE_HEIGHT - 1U)
 #define DISPLAY_TIME_MARGIN          5U
 #define DISPLAY_SPEC_MARGIN          3U
+#define DISPLAY_SPEC_X_MARGIN        32U
 #define DISPLAY_SPECTRUM_MAX_HZ      500000.0f
+#define DISPLAY_REFRESH_INTERVAL_MS  3000U
 
 typedef enum
 {
@@ -28,9 +30,18 @@ typedef enum
     UI_ACTION_DRAW_DASHBOARD,
     UI_ACTION_DRAW_TIME_1,
     UI_ACTION_DRAW_TIME_3,
-    UI_ACTION_RELOAD_DASHBOARD,
-    UI_ACTION_RANDOM_TEST
+    UI_ACTION_START_REAL,
+    UI_ACTION_START_TEST,
+    UI_ACTION_CLEAR_DASHBOARD,
+    UI_ACTION_STOP
 } UI_Action;
+
+typedef enum
+{
+    DISPLAY_RUN_STOPPED = 0,
+    DISPLAY_RUN_REAL_AUTO,
+    DISPLAY_RUN_TEST_AUTO
+} DisplayRunMode;
 
 typedef struct
 {
@@ -43,7 +54,8 @@ static UART_HandleTypeDef *s_uart = NULL;
 static volatile TJC_DashboardInfo s_dashboard = {0U, 0U, false};
 static volatile uint8_t s_visible_periods = 1U;
 static volatile UI_Action s_pending_action = UI_ACTION_NONE;
-static uint32_t s_last_drawn_sequence = 0U;
+static volatile DisplayRunMode s_run_mode = DISPLAY_RUN_STOPPED;
+static uint32_t s_next_refresh_tick = 0U;
 /*
  * AnalyzerResult包含256点float波形，单个对象超过1 KB。
  * 显示任务会继续调用HAL UART发送函数，不能在仅1 KB的主栈上保存
@@ -418,8 +430,91 @@ static void Display_UpdateResultTexts(const AnalyzerResult *result)
             );
         }
 
+        /*
+         * 原生ADC测试模式在“谐波2”末尾显示[T1]~[T9]，便于把屏幕
+         * 波形与生成器manifest、CSV和SVG中的同一测试向量对应起来。
+         * 真实ADC结果test_case_number为0，不显示任何测试标记。
+         */
+        if ((i == (ANALYZER_MAX_COMPONENTS - 1U)) &&
+            (result->source == ANALYZER_SOURCE_TEST) &&
+            (result->test_case_number != 0U))
+        {
+            size_t used = strlen(text);
+            if (used < sizeof(text))
+            {
+                (void)snprintf(
+                    &text[used],
+                    sizeof(text) - used,
+                    " [T%u]",
+                    (unsigned int)result->test_case_number
+                );
+            }
+        }
+
         (void)TJC_SetText(object_names[i], text);
     }
+}
+
+/**
+ * @brief 将六项测量文本恢复为无数据占位符。
+ */
+static void Display_ClearResultTexts(void)
+{
+    (void)TJC_SetText("t_vpp", "Upp: --.- mV");
+    (void)TJC_SetText("t_rms", "Urms: --.-- mV");
+    (void)TJC_SetText("t_freq", "f1: --.- kHz");
+    (void)TJC_SetText("t_c1", "基波: --.- kHz / --.- mVpk");
+    (void)TJC_SetText("t_c2", "谐波1: --.- kHz / --.- mVpk");
+    (void)TJC_SetText("t_c3", "谐波2: --.- kHz / --.- mVpk");
+}
+
+/**
+ * @brief 立即清除两条曲线和全部测量文本，但不改变运行模式。
+ *
+ * 运行模式下调用后会在下一个3秒周期重新显示；停止状态下保持空白。
+ */
+static HAL_StatusTypeDef Display_ClearDashboard(void)
+{
+    HAL_StatusTypeDef time_status = HAL_ERROR;
+    HAL_StatusTypeDef spectrum_status = HAL_ERROR;
+
+    if (s_dashboard.valid)
+    {
+        time_status = TJC_ClearCurve(
+            s_dashboard.time_curve_id,
+            TJC_CURVE_CHANNEL
+        );
+        spectrum_status = TJC_ClearCurve(
+            s_dashboard.spectrum_curve_id,
+            TJC_CURVE_CHANNEL
+        );
+    }
+
+    Display_ClearResultTexts();
+
+    if (time_status != HAL_OK)
+    {
+        return time_status;
+    }
+
+    return spectrum_status;
+}
+
+/**
+ * @brief 从当前时刻重新计算下一次3秒刷新期限。
+ */
+static void Display_ArmNextRefresh(void)
+{
+    s_next_refresh_tick =
+        HAL_GetTick() + DISPLAY_REFRESH_INTERVAL_MS;
+}
+
+/**
+ * @brief 使用有符号差值判断HAL毫秒计数是否到达期限，兼容计数回绕。
+ */
+static bool Display_IsRefreshDue(uint32_t now)
+{
+    return ((int32_t)(now - s_next_refresh_tick) >= 0);
 }
 
 /**
@@ -548,7 +643,8 @@ static HAL_StatusTypeDef Display_DrawTimeResult(
  * @brief 直接使用统一结果中的频率/峰值分量绘制定性频谱。
  *
  * 不再执行显示侧DFT：真实模式使用队友FFT输出，测试模式使用
- * 场景表中的最终分量。频率轴固定为0~500 kHz。
+ * 场景表中的最终分量。频率轴固定为0~500 kHz，并在左右各保留
+ * DISPLAY_SPEC_X_MARGIN个像素，避免0 Hz或500 kHz谱线贴住边框。
  */
 static HAL_StatusTypeDef Display_DrawSpectrumResult(
     const AnalyzerResult *result)
@@ -601,9 +697,14 @@ static HAL_StatusTypeDef Display_DrawSpectrumResult(
 
         calculated_position =
             (uint16_t)(
+                (float)DISPLAY_SPEC_X_MARGIN +
                 frequency_hz /
                 DISPLAY_SPECTRUM_MAX_HZ *
-                (float)(DISPLAY_CURVE_WIDTH - 1U) +
+                (float)(
+                    DISPLAY_CURVE_WIDTH -
+                    1U -
+                    2U * DISPLAY_SPEC_X_MARGIN
+                ) +
                 0.5f
             );
 
@@ -668,7 +769,6 @@ static HAL_StatusTypeDef Display_DrawDashboard(void)
     spectrum_status =
         Display_DrawSpectrumResult(&s_display_result);
     Display_UpdateResultTexts(&s_display_result);
-    s_last_drawn_sequence = s_display_result.sequence;
 
     if (spectrum_status != HAL_OK)
     {
@@ -695,29 +795,48 @@ static void Display_ProcessButtonCommand(uint8_t command)
     {
         s_visible_periods = 1U;
         s_pending_action =
-            s_dashboard.valid
+            (s_dashboard.valid &&
+             (s_run_mode != DISPLAY_RUN_STOPPED))
             ? UI_ACTION_DRAW_TIME_1
             : UI_ACTION_NONE;
     }
     else if (command == 0x02U)
     {
-        s_pending_action = UI_ACTION_RELOAD_DASHBOARD;
+        /*
+         * 刷新按钮恢复真实结果通路，并重新加载dashboard以完成页面握手。
+         */
+        s_pending_action = UI_ACTION_START_REAL;
     }
     else if (command == 0x03U)
     {
         s_visible_periods = 3U;
         s_pending_action =
-            s_dashboard.valid
+            (s_dashboard.valid &&
+             (s_run_mode != DISPLAY_RUN_STOPPED))
             ? UI_ACTION_DRAW_TIME_3
             : UI_ACTION_NONE;
     }
     else if (command == 0x04U)
     {
         /*
-         * A5 01 04 5A只触发统一接口的测试注入。
-         * 具体频率、幅值、Vpp和Vrms均不在协议解析器中赋值。
+         * 测试按钮启动随机测试自动刷新：立即生成一组结果，
+         * 此后每3秒重新生成一组。
          */
-        s_pending_action = UI_ACTION_RANDOM_TEST;
+        s_pending_action = UI_ACTION_START_TEST;
+    }
+    else if (command == 0x05U)
+    {
+        /*
+         * 清除只清空当前曲线和文本，不改变运行模式。
+         */
+        s_pending_action = UI_ACTION_CLEAR_DASHBOARD;
+    }
+    else if (command == 0x06U)
+    {
+        /*
+         * 停止冻结当前画面；只有刷新或测试才能重新开始绘制。
+         */
+        s_pending_action = UI_ACTION_STOP;
     }
 }
 
@@ -742,7 +861,10 @@ static void TJC_ProcessCustomFrame(const uint8_t *frame,
         s_dashboard.time_curve_id = frame[3];
         s_dashboard.spectrum_curve_id = frame[4];
         s_dashboard.valid = true;
-        s_pending_action = UI_ACTION_DRAW_DASHBOARD;
+        s_pending_action =
+            (s_run_mode == DISPLAY_RUN_STOPPED)
+            ? UI_ACTION_NONE
+            : UI_ACTION_DRAW_DASHBOARD;
         return;
     }
 
@@ -909,7 +1031,8 @@ void Display_Init(UART_HandleTypeDef *huart)
     s_dashboard.valid = false;
     s_visible_periods = 1U;
     s_pending_action = UI_ACTION_NONE;
-    s_last_drawn_sequence = 0U;
+    s_run_mode = DISPLAY_RUN_STOPPED;
+    s_next_refresh_tick = 0U;
     s_rx_frame_index = 0U;
     s_rx_frame_expected = 0U;
     s_status_frame_index = 0U;
@@ -918,7 +1041,7 @@ void Display_Init(UART_HandleTypeDef *huart)
 
     /*
      * 先清理可能遗留的RX数据和ORE，再启动逐字节中断接收。
-     * 这样dashboard初始化帧和四个按钮帧不会被FFT长任务饿死。
+     * 这样dashboard初始化帧和六个按钮帧不会被FFT长任务饿死。
      */
     __HAL_UART_CLEAR_OREFLAG(s_uart);
     __HAL_UART_FLUSH_DRREGISTER(s_uart);
@@ -930,7 +1053,8 @@ void Display_Init(UART_HandleTypeDef *huart)
 
 void Display_RedrawCurrentPage(void)
 {
-    if (s_dashboard.valid)
+    if (s_dashboard.valid &&
+        (s_run_mode != DISPLAY_RUN_STOPPED))
     {
         s_pending_action = UI_ACTION_DRAW_DASHBOARD;
     }
@@ -956,6 +1080,7 @@ void Display_RequestTest(void)
 void Display_Task(void)
 {
     UI_Action action;
+    uint32_t now;
 
     if (s_uart == NULL)
     {
@@ -963,14 +1088,20 @@ void Display_Task(void)
     }
 
     /*
-     * 真实分析或测试快照sequence变化后刷新一次。
-     * 测试覆盖期间真实结果仍在桥接层更新，但不会抢占测试画面。
+     * 运行状态下以固定3秒节拍刷新。真实模式重复显示桥接层最新快照；
+     * 测试模式每次到期先生成新的随机一致结果，再走同一绘图路径。
      */
+    now = HAL_GetTick();
     if ((s_pending_action == UI_ACTION_NONE) &&
         s_dashboard.valid &&
-        AnalyzerBridge_GetLatest(&s_display_result) &&
-        (s_display_result.sequence != s_last_drawn_sequence))
+        (s_run_mode != DISPLAY_RUN_STOPPED) &&
+        Display_IsRefreshDue(now))
     {
+        if (s_run_mode == DISPLAY_RUN_TEST_AUTO)
+        {
+            AnalyzerBridge_RunRandomTest();
+        }
+
         s_pending_action = UI_ACTION_DRAW_DASHBOARD;
     }
 
@@ -981,6 +1112,7 @@ void Display_Task(void)
     {
         case UI_ACTION_DRAW_DASHBOARD:
             (void)Display_DrawDashboard();
+            Display_ArmNextRefresh();
             break;
 
         case UI_ACTION_DRAW_TIME_1:
@@ -1003,14 +1135,41 @@ void Display_Task(void)
             }
             break;
 
-        case UI_ACTION_RELOAD_DASHBOARD:
+        case UI_ACTION_START_REAL:
+            s_run_mode = DISPLAY_RUN_REAL_AUTO;
+            AnalyzerBridge_UseRealResult();
             s_dashboard.valid = false;
+            Display_ArmNextRefresh();
             (void)TJC_SendCommand("page dashboard");
             break;
 
-        case UI_ACTION_RANDOM_TEST:
+        case UI_ACTION_START_TEST:
+            s_run_mode = DISPLAY_RUN_TEST_AUTO;
             AnalyzerBridge_RunRandomTest();
-            Display_RedrawCurrentPage();
+
+            if (s_dashboard.valid)
+            {
+                s_pending_action = UI_ACTION_DRAW_DASHBOARD;
+            }
+            else
+            {
+                (void)TJC_SendCommand("page dashboard");
+            }
+
+            Display_ArmNextRefresh();
+            break;
+
+        case UI_ACTION_CLEAR_DASHBOARD:
+            (void)Display_ClearDashboard();
+
+            if (s_run_mode != DISPLAY_RUN_STOPPED)
+            {
+                Display_ArmNextRefresh();
+            }
+            break;
+
+        case UI_ACTION_STOP:
+            s_run_mode = DISPLAY_RUN_STOPPED;
             break;
 
         case UI_ACTION_NONE:

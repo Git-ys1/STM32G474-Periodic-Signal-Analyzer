@@ -29,5 +29,7 @@
 **/.idea/
 **/.vscode/
 **/.settings/language.settings.xml
+**/__pycache__/
+**/*.pyc
 **/Thumbs.db
 **/Desktop.ini

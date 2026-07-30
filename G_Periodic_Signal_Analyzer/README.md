@@ -20,7 +20,9 @@
 - [V1.4融合稳定基线](docs/V1.4_FUSION_BASELINE_FREEZE_2026-07-30.md)
 - [V1.4.1实体按键兼容版](docs/V1.4.1_KEY1_RELEASE_2026-07-30.md)
 - [V1.4当前融合架构](docs/V1.4_INTEGRATION_ARCHITECTURE.md)
+- [队友工程双向融合速查](docs/TEAMMATE_INTEGRATION_QUICK_GUIDE.md)
 - [不可触摸屏KEY1实体按键控制](docs/KEY1_PHYSICAL_CONTROL.md)
+- [V1.6原生ADC测试集与波形提取验证](docs/V1.6_NATIVE_ADC_TEST_DATASET.md)
 - [当前开发状态](docs/CURRENT_STATUS.md)
 
 ## 目录
@@ -48,7 +50,9 @@ ADC2 + TIM3 TRGO + DMA循环采集
 → 淘晶驰dashboard
 ```
 
-测试按钮走同一显示路径，只在分析结果层注入一致的波形、Vpp、RMS与谱峰，不伪造ADC原始数据。
+测试按钮使用Python预生成的原生`uint16_t[2048]` ADC数组，并与真实输入共用
+“偏置去除→完整缓冲区相位折叠→256点周期快照→屏幕重采样”链路；测试场景的
+Vpp、RMS和谱峰仍采用理想期望值，因此不会重复验证队友的FFT与参数测量算法。
 
 ## 工程边界
 

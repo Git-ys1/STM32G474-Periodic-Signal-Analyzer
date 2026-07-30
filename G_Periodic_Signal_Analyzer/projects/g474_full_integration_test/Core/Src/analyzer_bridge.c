@@ -4,24 +4,18 @@
 #include <stddef.h>
 #include <string.h>
 
-#define ANALYZER_PI                         3.14159265358979323846f
-#define ANALYZER_TEST_CASE_COUNT            6U
 #define ANALYZER_STATUS_TEAMMATE_FLAG_MASK  0x000000FFUL
 #define ANALYZER_STATUS_TEST_OVERRIDE       0x00000100UL
+#define ANALYZER_PHASE_WEIGHT_EPSILON       0.000001f
+#define ANALYZER_TWO_PI                     6.28318530717958647692f
+#define ANALYZER_FREQ_SEARCH_HALF_HZ        500.0f
+#define ANALYZER_FREQ_SEARCH_STEP_HZ        10.0f
+#define ANALYZER_FREQ_SEARCH_COUNT          101U
 
-typedef struct
-{
-    uint8_t harmonic;
-    float amplitude_mv;
-    float phase_rad;
-} AnalyzerTestTone;
-
-typedef struct
-{
-    float fundamental_hz;
-    uint8_t component_count;
-    AnalyzerTestTone tones[ANALYZER_MAX_COMPONENTS];
-} AnalyzerTestCase;
+#if ANALYZER_TEST_ENABLE
+#include "generated_adc_tests.h"
+#define ANALYZER_TEST_CASE_COUNT GENERATED_ADC_TEST_CASE_COUNT
+#endif
 
 static AnalyzerResult s_real_result;
 static AnalyzerResult s_test_result;
@@ -35,40 +29,13 @@ static uint32_t s_next_sequence = 1U;
 static uint32_t s_random_state = 0x6D2B79F5UL;
 static uint8_t s_last_test_case = 0xFFU;
 static bool s_test_override = false;
-
-#if ANALYZER_TEST_ENABLE
 /*
- * 场景表保存“分析完成后的最终结果定义”。频谱直接使用这些分量，
- * 时域波形由同一组分量合成，因此两种显示和Vpp/Vrms保持一致。
+ * 完整2048点ADC缓冲区按基频相位折叠到256个显示相位槽。
+ * 两个工作数组必须是静态存储，避免占用仅1 KB的主栈。
  */
-static const AnalyzerTestCase s_test_cases[ANALYZER_TEST_CASE_COUNT] =
-{
-    {
-        10500.0f, 3U,
-        {{1U, 50.0f, 0.00f}, {3U, 25.0f, 0.42f}, {4U, 15.0f, -0.63f}}
-    },
-    {
-        25000.0f, 3U,
-        {{1U, 70.0f, 0.00f}, {2U, 20.0f, -0.35f}, {3U, 10.0f, 0.74f}}
-    },
-    {
-        80000.0f, 2U,
-        {{1U, 80.0f, 0.00f}, {2U, 30.0f, 0.58f}, {0U, 0.0f, 0.00f}}
-    },
-    {
-        120000.0f, 3U,
-        {{1U, 60.0f, 0.00f}, {2U, 20.0f, -0.48f}, {4U, 10.0f, 0.31f}}
-    },
-    {
-        200000.0f, 2U,
-        {{1U, 75.0f, 0.00f}, {2U, 25.0f, 0.67f}, {0U, 0.0f, 0.00f}}
-    },
-    {
-        250000.0f, 2U,
-        {{1U, 55.0f, 0.00f}, {2U, 15.0f, -0.52f}, {0U, 0.0f, 0.00f}}
-    }
-};
-#endif
+static float s_phase_sum_mv[ANALYZER_DISPLAY_POINT_COUNT];
+static float s_phase_weight[ANALYZER_DISPLAY_POINT_COUNT];
+static float s_frequency_scores[ANALYZER_FREQ_SEARCH_COUNT];
 
 static void AnalyzerBridge_SortComponents(AnalyzerComponent *components,
                                            uint8_t count)
@@ -91,6 +58,187 @@ static void AnalyzerBridge_SortComponents(AnalyzerComponent *components,
     }
 }
 
+/**
+ * @brief 计算指定频率处的单频相关能量。
+ *
+ * 使用正余弦递推避免在2048点循环中反复调用sinf/cosf。这里只比较候选
+ * 频率之间的相对能量，因此无需换算为实际电压或执行幅值归一化。
+ */
+static float AnalyzerBridge_CorrelationScore(
+    const uint16_t *adc_codes,
+    uint16_t sample_count,
+    float mean_code,
+    float sample_rate_hz,
+    float frequency_hz)
+{
+    float angle_step;
+    float step_real;
+    float step_imag;
+    float oscillator_real = 1.0f;
+    float oscillator_imag = 0.0f;
+    float accumulator_real = 0.0f;
+    float accumulator_imag = 0.0f;
+    uint16_t i;
+
+    if ((frequency_hz <= 0.0f) ||
+        (frequency_hz >= (sample_rate_hz * 0.5f)))
+    {
+        return -1.0f;
+    }
+
+    angle_step =
+        ANALYZER_TWO_PI *
+        frequency_hz /
+        sample_rate_hz;
+    step_real = cosf(angle_step);
+    step_imag = sinf(angle_step);
+
+    for (i = 0U; i < sample_count; ++i)
+    {
+        float sample =
+            (float)adc_codes[i] - mean_code;
+        float next_real;
+
+        accumulator_real += sample * oscillator_real;
+        accumulator_imag -= sample * oscillator_imag;
+
+        next_real =
+            oscillator_real * step_real -
+            oscillator_imag * step_imag;
+        oscillator_imag =
+            oscillator_imag * step_real +
+            oscillator_real * step_imag;
+        oscillator_real = next_real;
+    }
+
+    return
+        accumulator_real * accumulator_real +
+        accumulator_imag * accumulator_imag;
+}
+
+/**
+ * @brief 为波形相位折叠细化基频，不修改对外显示的队友测量结果。
+ *
+ * 队友FFT频率分辨率为500 Hz。若直接用量化后的频率折叠完整2 ms缓冲区，
+ * 约±250 Hz的误差会在多个周期上累计并把波形平均变小。这里选取幅度最大
+ * 的已识别谱线中选择“幅度×谐波次数”最大的参考谱线，在粗基频±500 Hz
+ * 范围内按10 Hz步进搜索相关峰，再用三点抛物线插值得到更精细的折叠频率。
+ */
+static float AnalyzerBridge_RefineFundamentalForWaveform(
+    const AnalyzerResult *result,
+    const uint16_t *adc_codes,
+    uint16_t sample_count,
+    float mean_code,
+    float sample_rate_hz)
+{
+    uint8_t reference_index = 0U;
+    uint16_t harmonic_order;
+    uint16_t best_index = 0U;
+    uint16_t i;
+    float best_information_score = -1.0f;
+    float ratio;
+    float best_score = -1.0f;
+    float fractional_offset = 0.0f;
+
+    if ((result == NULL) ||
+        (adc_codes == NULL) ||
+        (result->component_count == 0U) ||
+        (result->fundamental_hz <= 0.0f))
+    {
+        return 0.0f;
+    }
+
+    for (i = 0U; i < result->component_count; ++i)
+    {
+        uint16_t candidate_order =
+            (uint16_t)(
+                result->components[i].frequency_hz /
+                result->fundamental_hz +
+                0.5f
+            );
+        float information_score;
+
+        if (candidate_order == 0U)
+        {
+            candidate_order = 1U;
+        }
+
+        information_score =
+            result->components[i].amplitude_mv *
+            (float)candidate_order;
+        if (information_score > best_information_score)
+        {
+            best_information_score = information_score;
+            reference_index = (uint8_t)i;
+        }
+    }
+
+    ratio =
+        result->components[reference_index].frequency_hz /
+        result->fundamental_hz;
+    harmonic_order = (uint16_t)(ratio + 0.5f);
+    if (harmonic_order == 0U)
+    {
+        harmonic_order = 1U;
+    }
+
+    for (i = 0U; i < ANALYZER_FREQ_SEARCH_COUNT; ++i)
+    {
+        float candidate_fundamental =
+            result->fundamental_hz -
+            ANALYZER_FREQ_SEARCH_HALF_HZ +
+            (float)i * ANALYZER_FREQ_SEARCH_STEP_HZ;
+        float candidate_tone =
+            candidate_fundamental *
+            (float)harmonic_order;
+
+        s_frequency_scores[i] =
+            AnalyzerBridge_CorrelationScore(
+                adc_codes,
+                sample_count,
+                mean_code,
+                sample_rate_hz,
+                candidate_tone
+            );
+
+        if (s_frequency_scores[i] > best_score)
+        {
+            best_score = s_frequency_scores[i];
+            best_index = i;
+        }
+    }
+
+    if ((best_index > 0U) &&
+        (best_index + 1U < ANALYZER_FREQ_SEARCH_COUNT))
+    {
+        float left = s_frequency_scores[best_index - 1U];
+        float center = s_frequency_scores[best_index];
+        float right = s_frequency_scores[best_index + 1U];
+        float denominator =
+            left - 2.0f * center + right;
+
+        if (fabsf(denominator) > ANALYZER_PHASE_WEIGHT_EPSILON)
+        {
+            fractional_offset =
+                0.5f * (left - right) / denominator;
+            if (fractional_offset < -1.0f)
+            {
+                fractional_offset = -1.0f;
+            }
+            else if (fractional_offset > 1.0f)
+            {
+                fractional_offset = 1.0f;
+            }
+        }
+    }
+
+    return
+        result->fundamental_hz -
+        ANALYZER_FREQ_SEARCH_HALF_HZ +
+        ((float)best_index + fractional_offset) *
+        ANALYZER_FREQ_SEARCH_STEP_HZ;
+}
+
 static bool AnalyzerBridge_BuildRealWaveform(
     AnalyzerResult *result,
     const uint16_t *adc_codes,
@@ -99,6 +247,10 @@ static bool AnalyzerBridge_BuildRealWaveform(
     float sample_rate_hz)
 {
     float samples_per_period;
+    float mean_code = 0.0f;
+    float fold_frequency_hz;
+    float phase_cycles = 0.0f;
+    float phase_step;
     float mean_mv = 0.0f;
     uint16_t i;
 
@@ -112,8 +264,33 @@ static bool AnalyzerBridge_BuildRealWaveform(
         return false;
     }
 
+    /*
+     * 旧实现只取第一个周期的Fs/f1个点并拉伸到256点。
+     * 250 kHz时每周期仅4.096个采样点，无法保持复合波形形状。
+     * 这里使用完整ADC缓冲区，把所有周期按基频相位折叠到256槽。
+     */
+    for (i = 0U; i < sample_count; ++i)
+    {
+        mean_code += (float)adc_codes[i];
+    }
+    mean_code /= (float)sample_count;
+
+    fold_frequency_hz =
+        AnalyzerBridge_RefineFundamentalForWaveform(
+            result,
+            adc_codes,
+            sample_count,
+            mean_code,
+            sample_rate_hz
+        );
+
+    if (fold_frequency_hz <= 0.0f)
+    {
+        return false;
+    }
+
     samples_per_period =
-        sample_rate_hz / result->fundamental_hz;
+        sample_rate_hz / fold_frequency_hz;
 
     if ((samples_per_period < 2.0f) ||
         (samples_per_period > (float)sample_count))
@@ -121,41 +298,141 @@ static bool AnalyzerBridge_BuildRealWaveform(
         return false;
     }
 
-    for (i = 0U; i < ANALYZER_DISPLAY_POINT_COUNT; ++i)
+    memset(s_phase_sum_mv, 0, sizeof(s_phase_sum_mv));
+    memset(s_phase_weight, 0, sizeof(s_phase_weight));
+    phase_step = fold_frequency_hz / sample_rate_hz;
+
+    for (i = 0U; i < sample_count; ++i)
     {
-        float source_position =
-            (float)i *
-            samples_per_period /
-            (float)ANALYZER_DISPLAY_POINT_COUNT;
-        uint16_t index0 = (uint16_t)source_position;
+        float phase_position =
+            phase_cycles * (float)ANALYZER_DISPLAY_POINT_COUNT;
+        uint16_t index0 = (uint16_t)phase_position;
         uint16_t index1;
         float fraction;
-        float code;
         float sample_mv;
+        float weight0;
 
-        if (index0 >= sample_count)
+        if (index0 >= ANALYZER_DISPLAY_POINT_COUNT)
         {
-            index0 = (uint16_t)(sample_count - 1U);
+            index0 = 0U;
         }
 
-        index1 = (uint16_t)(index0 + 1U);
-        if (index1 >= sample_count)
+        fraction = phase_position - (float)index0;
+        index1 =
+            (uint16_t)(
+                (index0 + 1U) %
+                ANALYZER_DISPLAY_POINT_COUNT
+            );
+        sample_mv =
+            ((float)adc_codes[i] - mean_code) *
+            volts_per_code *
+            1000.0f;
+        weight0 = 1.0f - fraction;
+
+        s_phase_sum_mv[index0] += sample_mv * weight0;
+        s_phase_weight[index0] += weight0;
+
+        if (fraction > ANALYZER_PHASE_WEIGHT_EPSILON)
         {
-            index1 = index0;
+            s_phase_sum_mv[index1] += sample_mv * fraction;
+            s_phase_weight[index1] += fraction;
         }
 
-        fraction = source_position - (float)index0;
-        code =
-            (float)adc_codes[index0] +
-            fraction *
-            ((float)adc_codes[index1] -
-             (float)adc_codes[index0]);
-        sample_mv = code * volts_per_code * 1000.0f;
-
-        result->waveform_mv[i] = sample_mv;
-        mean_mv += sample_mv;
+        phase_cycles += phase_step;
+        while (phase_cycles >= 1.0f)
+        {
+            phase_cycles -= 1.0f;
+        }
     }
 
+    /*
+     * 先归一化有采样覆盖的相位槽；当频率与采样率形成较短有理比时，
+     * 少数槽可能为空，随后在相邻有效槽之间做环形线性插值。
+     */
+    for (i = 0U; i < ANALYZER_DISPLAY_POINT_COUNT; ++i)
+    {
+        if (s_phase_weight[i] > ANALYZER_PHASE_WEIGHT_EPSILON)
+        {
+            result->waveform_mv[i] =
+                s_phase_sum_mv[i] / s_phase_weight[i];
+        }
+        else
+        {
+            result->waveform_mv[i] = 0.0f;
+        }
+    }
+
+    for (i = 0U; i < ANALYZER_DISPLAY_POINT_COUNT; ++i)
+    {
+        uint16_t left_distance;
+        uint16_t right_distance;
+        uint16_t left_index;
+        uint16_t right_index;
+        float ratio;
+
+        if (s_phase_weight[i] > ANALYZER_PHASE_WEIGHT_EPSILON)
+        {
+            continue;
+        }
+
+        for (left_distance = 1U;
+             left_distance <= ANALYZER_DISPLAY_POINT_COUNT;
+             ++left_distance)
+        {
+            left_index =
+                (uint16_t)(
+                    (i +
+                     ANALYZER_DISPLAY_POINT_COUNT -
+                     left_distance) %
+                    ANALYZER_DISPLAY_POINT_COUNT
+                );
+            if (s_phase_weight[left_index] >
+                ANALYZER_PHASE_WEIGHT_EPSILON)
+            {
+                break;
+            }
+        }
+
+        for (right_distance = 1U;
+             right_distance <= ANALYZER_DISPLAY_POINT_COUNT;
+             ++right_distance)
+        {
+            right_index =
+                (uint16_t)(
+                    (i + right_distance) %
+                    ANALYZER_DISPLAY_POINT_COUNT
+                );
+            if (s_phase_weight[right_index] >
+                ANALYZER_PHASE_WEIGHT_EPSILON)
+            {
+                break;
+            }
+        }
+
+        if ((left_distance > ANALYZER_DISPLAY_POINT_COUNT) ||
+            (right_distance > ANALYZER_DISPLAY_POINT_COUNT))
+        {
+            return false;
+        }
+
+        ratio =
+            (float)left_distance /
+            (float)(left_distance + right_distance);
+        result->waveform_mv[i] =
+            result->waveform_mv[left_index] +
+            ratio *
+            (result->waveform_mv[right_index] -
+             result->waveform_mv[left_index]);
+    }
+
+    /*
+     * ADC前端会把无直流偏置的输入信号抬到中点电压。
+     * 相位折叠后再去均值，只保留题目要求显示的交流波形。
+     */
+    for (i = 0U; i < ANALYZER_DISPLAY_POINT_COUNT; ++i)
+    {
+        mean_mv += result->waveform_mv[i];
+    }
     mean_mv /= (float)ANALYZER_DISPLAY_POINT_COUNT;
 
     for (i = 0U; i < ANALYZER_DISPLAY_POINT_COUNT; ++i)
@@ -185,21 +462,24 @@ static uint32_t AnalyzerBridge_XorShift32(void)
     return value;
 }
 
-static void AnalyzerBridge_BuildTestResult(
-    const AnalyzerTestCase *test_case,
+static bool AnalyzerBridge_BuildTestResult(
+    const GeneratedAdcTestCase *test_case,
     AnalyzerResult *result)
 {
-    float maximum_mv = -3.402823466e+38F;
-    float minimum_mv = 3.402823466e+38F;
-    float square_sum = 0.0f;
-    uint16_t i;
     uint8_t component;
+
+    if ((test_case == NULL) || (result == NULL))
+    {
+        return false;
+    }
 
     memset(result, 0, sizeof(*result));
     result->source = ANALYZER_SOURCE_TEST;
     result->fundamental_hz = test_case->fundamental_hz;
+    result->vpp_mv = test_case->expected_vpp_mv;
+    result->vrms_mv = test_case->expected_vrms_mv;
     result->component_count = test_case->component_count;
-    result->waveform_count = ANALYZER_DISPLAY_POINT_COUNT;
+    result->test_case_number = test_case->test_number;
     result->status_flags = ANALYZER_STATUS_TEST_OVERRIDE;
 
     for (component = 0U;
@@ -207,55 +487,29 @@ static void AnalyzerBridge_BuildTestResult(
          ++component)
     {
         result->components[component].frequency_hz =
-            test_case->fundamental_hz *
-            (float)test_case->tones[component].harmonic;
+            test_case->component_frequencies_hz[component];
         result->components[component].amplitude_mv =
-            test_case->tones[component].amplitude_mv;
+            test_case->component_amplitudes_mv[component];
     }
 
-    for (i = 0U; i < ANALYZER_DISPLAY_POINT_COUNT; ++i)
+    /*
+     * 测试数据从与队友adc_b完全相同的uint16_t[2048]入口进入，
+     * 与真实结果共用AnalyzerBridge_BuildRealWaveform()，不再直接
+     * 在分析结果后合成256点理想波形。
+     */
+    if (!AnalyzerBridge_BuildRealWaveform(
+            result,
+            test_case->adc_codes,
+            GENERATED_ADC_SAMPLE_COUNT,
+            GENERATED_ADC_VOLTS_PER_CODE,
+            GENERATED_ADC_SAMPLE_RATE_HZ))
     {
-        float base_phase =
-            2.0f * ANALYZER_PI *
-            (float)i /
-            (float)ANALYZER_DISPLAY_POINT_COUNT;
-        float sample_mv = 0.0f;
-
-        for (component = 0U;
-             component < test_case->component_count;
-             ++component)
-        {
-            sample_mv +=
-                test_case->tones[component].amplitude_mv *
-                sinf(
-                    (float)test_case->tones[component].harmonic *
-                    base_phase +
-                    test_case->tones[component].phase_rad
-                );
-        }
-
-        result->waveform_mv[i] = sample_mv;
-        square_sum += sample_mv * sample_mv;
-
-        if (sample_mv > maximum_mv)
-        {
-            maximum_mv = sample_mv;
-        }
-
-        if (sample_mv < minimum_mv)
-        {
-            minimum_mv = sample_mv;
-        }
+        return false;
     }
 
-    result->vpp_mv = maximum_mv - minimum_mv;
-    result->vrms_mv =
-        sqrtf(
-            square_sum /
-            (float)ANALYZER_DISPLAY_POINT_COUNT
-        );
     result->sequence = s_next_sequence++;
     result->valid = 1U;
+    return true;
 }
 #endif
 
@@ -407,13 +661,19 @@ void AnalyzerBridge_RunRandomTest(void)
             );
     }
 
-    AnalyzerBridge_BuildTestResult(
-        &s_test_cases[selected_case],
-        &s_test_result
-    );
-    s_last_test_case = selected_case;
-    s_test_override = true;
+    if (AnalyzerBridge_BuildTestResult(
+            &s_generated_adc_test_cases[selected_case],
+            &s_test_result))
+    {
+        s_last_test_case = selected_case;
+        s_test_override = true;
+    }
 #endif
+}
+
+void AnalyzerBridge_UseRealResult(void)
+{
+    s_test_override = false;
 }
 
 bool AnalyzerBridge_IsTestOverrideActive(void)

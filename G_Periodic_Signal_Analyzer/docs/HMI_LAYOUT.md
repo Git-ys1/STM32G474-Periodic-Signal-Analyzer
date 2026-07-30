@@ -1,7 +1,7 @@
 # HMI布局基线
 
 更新时间：2026-07-30  
-适用版本：V1.3.1 dashboard单页面
+适用版本：V1.5自动刷新候选版 dashboard单页面
 
 配套源工程：
 `projects/tjc_display_demo/HMI/TJC8048X270_dashboard_v1.3.1.HMI`，
@@ -20,7 +20,10 @@
 | `s_spec` | 正频率轴频谱 | 794×145，通道0 |
 | `b0` | 显示1个周期 | 文本`1T` |
 | `b1` | 显示3个周期 | 文本`3T` |
-| `b2` | 重新加载并完整刷新dashboard | type 98，id 11，文本`刷新` |
+| `b2` | 进入真实结果自动刷新 | 文本`刷新` |
+| `b3` | 进入随机测试自动刷新 | 文本`测试` |
+| `b4` | 单次清除曲线和参数 | type 98，id 15，文本`清除` |
+| `b5` | 停止绘画并冻结画面 | type 98，id 16，文本`停止` |
 | `t_vpp` | 峰峰值 | type 116，id 2 |
 | `t_rms` | 真有效值 | type 116，id 3 |
 | `t_freq` | 基频 | type 116，id 4 |
@@ -62,6 +65,9 @@ printh 5A
 b0: printh A5 01 01 5A
 b1: printh A5 01 03 5A
 b2: printh A5 01 02 5A
+b3: printh A5 01 04 5A
+b4: printh A5 01 05 5A
+b5: printh A5 01 06 5A
 ```
 
-三个按钮均不勾选“发送键值”。
+六个按钮均不勾选“发送键值”。

@@ -45,6 +45,11 @@ typedef struct
     uint16_t waveform_count;
     float waveform_mv[ANALYZER_DISPLAY_POINT_COUNT];
 
+    /*
+     * 测试模式下为1~GENERATED_ADC_TEST_CASE_COUNT，真实ADC模式为0。
+     * 仅用于屏幕标识当前原生ADC测试向量，不参与任何测量计算。
+     */
+    uint8_t test_case_number;
     uint32_t status_flags;
 } AnalyzerResult;
 
@@ -56,7 +61,8 @@ void AnalyzerBridge_Init(void);
 /**
  * @brief 发布一次队友算法已经完成的真实分析结果。
  *
- * @param adc_codes 原始ADC采样码。桥接层仅从中抽取一个周期的256点显示快照。
+ * @param adc_codes 原始ADC采样码。桥接层使用完整缓冲区按基频相位折叠，
+ *                  生成一个周期的256点显示快照。
  * @param sample_count 原始采样点数。
  * @param volts_per_code 每个ADC码对应的电压，单位V。
  * @param sample_rate_hz 实际或当前算法使用的采样率，单位Hz。
@@ -89,9 +95,19 @@ bool AnalyzerBridge_GetLatest(AnalyzerResult *result);
 /**
  * @brief 随机选择一组完整测试场景并锁存为当前显示结果。
  *
- * 测试注入位于队友计算完成后的结果层，不伪造ADC或FFT输入。
+ * 测试场景使用Python预生成的原生uint16_t[2048] ADC数组，并与真实输入
+ * 共用波形提取链路；Vpp、RMS和谱峰元数据仍使用每个场景的理想期望值，
+ * 因此本接口不重复验证队友的FFT和参数测量算法。
  */
 void AnalyzerBridge_RunRandomTest(void);
+
+/**
+ * @brief 取消测试结果覆盖，恢复读取最新真实分析结果。
+ *
+ * 刷新按钮进入真实自动刷新模式时调用。真实结果在测试覆盖期间仍会持续发布，
+ * 因此取消覆盖后无需重新计算即可读取最近一次有效真实快照。
+ */
+void AnalyzerBridge_UseRealResult(void);
 
 /**
  * @brief 查询当前显示是否被测试结果覆盖。
