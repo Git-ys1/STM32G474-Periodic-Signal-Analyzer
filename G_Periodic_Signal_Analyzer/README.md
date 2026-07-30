@@ -1,51 +1,54 @@
-# G 题周期信号测量分析装置工作区
+# G题周期信号测量分析装置
 
-本目录集中保存 G 题两条相互独立的实际固件开发线。它们属于同一套竞赛装置，但由不同成员分别负责，当前没有合并成一个可直接烧录的工程。
+本仓库保存2026年电赛G题的显示基线、队友信号处理快照和当前可烧录的全量融合工程。主控为STM32G474VET6，显示器为淘晶驰X2系列7英寸串口屏TJC8048X270_011R。
+
+## 当前冻结版本
+
+当前阶段基线为 **V1.4全量融合稳定版（2026-07-30）**：
+
+- ADC2、TIM3、DMA、2048点FFT、Vpp与RMS沿用队友工程；
+- `AnalyzerBridge`把真实结果和测试结果统一成稳定快照；
+- `display.c`负责dashboard单页面、时域、频谱、文本与HMI协议；
+- USART3使用PC10/PC11、115200 bit/s，接收采用中断，绘图仍在主循环；
+- 已通过Keil Clean Build、ST-Link运行态检查和HMI模拟器实测；
+- 已验证1T、3T、刷新、测试按钮、复合时域波形、三根频谱线和六项文本。
+
+冻结说明见：
+
+- [V1.4融合稳定基线](docs/V1.4_FUSION_BASELINE_FREEZE_2026-07-30.md)
+- [V1.4当前融合架构](docs/V1.4_INTEGRATION_ARCHITECTURE.md)
+- [当前开发状态](docs/CURRENT_STATUS.md)
 
 ## 目录
 
 ```text
-G_Periodic_Signal_Analyzer/
-├─ projects/
-│  ├─ tjc_display_demo/
-│  └─ teammate_adc_reference/
-└─ docs/
-   └─ integration-notes.md
+projects/
+├─ tjc_display_demo/             已验证的V1.3.1独立显示基线
+├─ teammate_adc_reference/       队友早期参考快照
+├─ teammate_adc_newest/          2026-07-30队友最新原始快照
+└─ g474_full_integration_test/   当前V1.4全量融合与烧录工程
 ```
 
-## `tjc_display_demo`
+## 当前主链路
 
-- 来源：原 `test/TJC_sine_test`；
-- 工具链：STM32CubeIDE；
-- 主控：STM32G474VET6；
-- 显示器：淘晶驰 X2 系列 TJC8048X270_011R；
-- 当前用途：独立验证串口屏页面、1/3 周期时域显示、参数文本、定性频谱和触摸按钮；
-- 当前演示数据：内部 100 kHz 正弦和 256 点演示 DFT；
-- 当前状态：以已验证的单文件 `main.c` 为行为基准，显示链路仅封装为一个 `display` 模块；`main.c` 只负责初始化和循环调用。
+```text
+ADC2 + TIM3 TRGO + DMA循环采集
+→ 队友fft()提取2～3个谱峰
+→ 立即快照谱峰，避免Vpp_R()二次fft()覆盖
+→ 队友Vpp与真RMS计算
+→ AnalyzerBridge_PublishReal()
+→ AnalyzerResult稳定快照
+→ Display_Task()
+→ cle/addt + FE/FD握手
+→ USART3
+→ 淘晶驰dashboard
+```
 
-## `teammate_adc_reference`
+测试按钮走同一显示路径，只在分析结果层注入一致的波形、Vpp、RMS与谱峰，不伪造ADC原始数据。
 
-- 来源：原 `test/Core`；
-- 工具链：STM32CubeMX + Keil MDK；
-- 主控：STM32G474VET6；
-- 当前内容：ADC、DAC、DMA、定时器、USART、AD9833 及 CMSIS/HAL；
-- 当前用途：信号采集和处理负责人的独立工程快照。
+## 工程边界
 
-## 当前边界
-
-- 两个工程分别构建和验证；
-- 不直接互相覆盖 `main.c`、`.ioc` 或工程配置；
-- 不在显示工程内重复实现正式 ADC/FFT 算法；
-- 不在信号处理工程内复制淘晶驰协议实现；
-- 等双方明确数据接口后，再决定最终整机工程以哪一套配置为底座。
-
-具体接口约定见 [docs/integration-notes.md](docs/integration-notes.md)。
-
-当前显示冻结基线及本次故障复盘见
-[docs/DISPLAY_BASELINE_FREEZE_2026-07-30.md](docs/DISPLAY_BASELINE_FREEZE_2026-07-30.md)。
-
-当前显示代码入口、函数职责、数据流和后续接入边界见
-[docs/CURRENT_DISPLAY_BASELINE_PATH.md](docs/CURRENT_DISPLAY_BASELINE_PATH.md)。
-
-当前已验证的dashboard单页面V1.3.1故障复盘、修改清单、HMI配套要求与截图证据见
-[docs/DASHBOARD_V1.3.1_RELEASE.md](docs/DASHBOARD_V1.3.1_RELEASE.md)。
+- `tjc_display_demo`和两个队友快照作为历史/对照工程冻结，不被融合工程反向覆盖；
+- 正式开发以`g474_full_integration_test`为当前底座；
+- HMI通信、FE/FD握手和页面协议不再随意重构；
+- 下一阶段以真实输入标定、算法微调和最终实物屏回归为主。

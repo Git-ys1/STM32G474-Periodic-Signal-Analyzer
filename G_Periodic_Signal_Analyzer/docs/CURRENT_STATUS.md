@@ -1,115 +1,76 @@
 # 当前开发状态
 
 更新时间：2026-07-30  
-版本：V1.3.1 dashboard单页面显示基线，HMI模拟器回归通过
+版本：V1.4全量融合稳定基线
 
 ## 已完成
 
-- HMI由time/spectrum双页面改为`dashboard`单页面；
-- MCU启动命令改为`page dashboard`；
-- 解析6字节页面初始化帧；
-- 动态保存`s_time`和`s_spec`数字ID；
-- 曲线尺寸改为794×145，纵向数据范围改为0～144；
-- dashboard就绪后依次绘制时域、频谱并更新六项文本；
-- 1T/3T按钮只刷新时域曲线；
-- 新增刷新按钮协议`A5 01 02 5A`，可重新加载dashboard并恢复丢失的首次握手；
-- 文本数值改用定点整数格式化，规避newlib-nano未启用浮点printf导致的空白数字；
-- 删除旧页面切换和`current_page`逻辑；
-- 保留模拟正弦、256点演示DFT和FE/FD握手；
-- 保留频谱横向方向修正；
-- C源码已验证为UTF-8；
-- STM32 Debug Clean Build通过，0 errors、0 warnings；
-- 构建规模：text 23880 B、data 96 B、bss 4920 B，总计28896 B；
-- USART HMI模拟器已验证1T、3T、频谱和六项文本完整显示；
-- 当前配套HMI为最新单页面`testv2.HMI`，旧`testv1.HMI`不得混用；
-- 完整故障复盘与发布证据见`DASHBOARD_V1.3.1_RELEASE.md`。
+- 以`teammate_adc_newest`为硬件、采集和算法底座建立独立融合工程；
+- 保留ADC2、TIM3 TRGO、DMA循环采集、2048点FFT、Vpp和真RMS；
+- 新增`AnalyzerBridge`，用统一`AnalyzerResult`承接真实结果与测试结果；
+- 在第一次FFT后立即保存谱峰，避免`Vpp_R()`内部二次FFT覆盖频谱输出；
+- dashboard单页同时显示时域、频谱、Upp、Urms、基频和最多三个谱峰；
+- 1T、3T、刷新和测试四个按钮均已实测；
+- 测试按钮内置六组一致场景，波形、Vpp、RMS和谱峰来自同一场景定义；
+- UART3接收改为中断，避免2048点FFT期间未及时读DR造成ORE；
+- 大型结果结构体改为静态存储，消除1 KB启动栈溢出；
+- ArmClang构建加入`__ARM_use_no_argv`，消除启动阶段semihosting `BKPT 0xAB`；
+- ST-Link已确认CPU处于正常Thread状态、Fault寄存器清零、栈指针合法、UART无ORE；
+- HMI模拟器已稳定显示复合时域波形、三根定性频谱线及全部文本。
 
-## 当前模拟数据
+## 当前主链路
 
 ```text
-频率：100 kHz
-峰值：100 mV
-峰峰值：200 mVpp
-真有效值：约70.71 mV
+ADC2 + TIM3 + DMA
+→ fft()
+→ 快照F/V、FB/VB、FC/VC
+→ Vpp与Vrms
+→ AnalyzerBridge_PublishReal()
+→ AnalyzerResult
+→ Display_Task()
+→ TJC cle/addt + FE/FD
+→ USART3
+→ dashboard
 ```
 
-预期六项文本：
+测试链路：
 
 ```text
-Upp: 200.0 mV
-Urms: 70.71 mV
-f1: 100.0 kHz
-基波: 100.0 kHz / 100.0 mVpk
-谐波1: --.- kHz / --.- mVpk
-谐波2: --.- kHz / --.- mVpk
+A5 01 04 5A
+→ AnalyzerBridge_RunRandomTest()
+→ 锁存测试快照
+→ 同一Display_Task()路径
 ```
 
-## 已完成的HMI模拟器回归
-
-### 上电
-
-应收到：
+## 最终构建
 
 ```text
-A5 20 01 <time_id> <spec_id> 5A
+Arm Compiler 6.7
+0 Error(s), 0 Warning(s)
+Code=56544, RO-data=25700, RW-data=52, ZI-data=48276
 ```
 
-随后时域和频谱各完成一次：
+输出位于本地忽略目录：
 
 ```text
-FE FF FF FF
-FD FF FF FF
+projects/g474_full_integration_test/ADC/MDK-ARM/ADC/
 ```
 
-### 1T
+## 实测证据
 
-点击`b0`后收到：
+- 10.5/31.5/42 kHz复合场景：Upp 126.0 mV，Urms 40.93 mV；
+- 120/240/480 kHz复合场景：Upp 136.1 mV，Urms 45.28 mV；
+- 两组均正确显示1T/3T、复合波形、三根谱线和对应文本；
+- 曲线透传均完成`FE FF FF FF`与`FD FF FF FF`握手。
 
-```text
-A5 01 01 5A
-```
+详见：
 
-只刷新`s_time`，显示一个完整周期。
+- `V1.4_FUSION_BASELINE_FREEZE_2026-07-30.md`
+- `V1.4_INTEGRATION_ARCHITECTURE.md`
 
-### 3T
+## 当前冻结边界
 
-点击`b1`后收到：
-
-```text
-A5 01 03 5A
-```
-
-只刷新`s_time`，显示三个完整周期。
-
-### 刷新
-
-在HMI模拟器已经连接后点击`b2`，应收到：
-
-```text
-A5 01 02 5A
-```
-
-随后MCU发送`page dashboard`，页面重新上报：
-
-```text
-A5 20 01 <time_id> <spec_id> 5A
-```
-
-时域和频谱应各完成一次FE/FD握手，并显示完整六项数值。
-
-### 禁止项
-
-实机日志不得出现：
-
-```text
-12 FF FF FF
-1A FF FF FF
-1C FF FF FF
-24 FF FF FF
-```
-
-## 尚未完成
-
-- 尚未在最终TJC8048X270_011R实物屏上完成同版HMI与固件回归；
-- 尚未接入队友的真实ADC波形、测量结果和FFT谱峰；
-- 当前DFT仍为显示链路演示，不满足G题最终500 Hz频率分辨率。
+- 不再重构已稳定的HMI协议、FE/FD握手或UART接收框架；
+- 不反向修改`tjc_display_demo`和队友原始快照；
+- 后续只做真实信号标定、算法精度验证、测试模式关闭和最终实体屏回归；
+- 任何后续改动必须先分支/提交，再按“上电→1T→3T→测试→刷新”回归。
