@@ -54,6 +54,14 @@
 #define ADC_SIZE 2048
 #define ANALYZER_SAMPLE_RATE_HZ 1024000.0f
 #define ADC_VOLTS_PER_CODE      (3.3f / 4096.0f)
+/*
+ * KEY1实体按键控制总开关：
+ * 1U：启用PB8短按切换1T/3T、长按执行原“测试”按钮命令；
+ * 0U：完全关闭本功能，保留原有HMI与显示链路。
+ */
+#define BOARD_KEY_CONTROL_ENABLE 1U
+#define BOARD_KEY_DEBOUNCE_MS    30U
+#define BOARD_KEY_LONG_PRESS_MS  1000U
 /* float ר�� */
 #define SWAP_F(a, b)  do { float _t = (a); (a) = (b); (b) = _t; } while (0)
 uint16_t adc_b[ADC_SIZE]={0};
@@ -83,6 +91,15 @@ float F,V,FB,VB,VC,FC,TE;
 uint32_t valid_len;
 uint32_t discard_len;
 uint16_t flag=0;
+
+#if BOARD_KEY_CONTROL_ENABLE
+/*
+ * EXTI回调只写入按下时刻和跟踪标志。
+ * UART发送与曲线重绘必须留在主循环，不能放进中断。
+ */
+static volatile uint32_t s_key_press_tick = 0U;
+static volatile uint8_t s_key_press_active = 0U;
+#endif
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -169,6 +186,65 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 HAL_ADC_Stop_DMA(&hadc2);
 	}
 }
+
+#if BOARD_KEY_CONTROL_ENABLE
+/**
+ * @brief KEY1上升沿中断回调。
+ *
+ * PB8松开时为低电平、按下时为高电平。中断中只记录按下时刻，
+ * 不等待松开，也不调用显示或UART函数。
+ */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    if ((GPIO_Pin == KEY_Pin) &&
+        (s_key_press_active == 0U) &&
+        (HAL_GPIO_ReadPin(KEY_GPIO_Port, KEY_Pin) == GPIO_PIN_SET))
+    {
+        s_key_press_tick = HAL_GetTick();
+        s_key_press_active = 1U;
+    }
+}
+
+/**
+ * @brief 在主循环中检测KEY1松开并执行短按/长按动作。
+ *
+ * 按住不足30 ms视为抖动；30~999 ms执行原1T/3T按钮命令；
+ * 按住至少1000 ms后松开，执行原“测试”按钮命令。
+ */
+static void BoardKey_Task(void)
+{
+    uint32_t press_tick;
+    uint32_t held_ms;
+
+    if ((s_key_press_active == 0U) ||
+        (HAL_GPIO_ReadPin(KEY_GPIO_Port, KEY_Pin) == GPIO_PIN_SET))
+    {
+        return;
+    }
+
+    /*
+     * PB8已经回到低电平，说明本次按压结束。
+     * 先清除活动标志，再根据持续时间安排主循环显示动作。
+     */
+    press_tick = s_key_press_tick;
+    s_key_press_active = 0U;
+    held_ms = HAL_GetTick() - press_tick;
+
+    if (held_ms < BOARD_KEY_DEBOUNCE_MS)
+    {
+        return;
+    }
+
+    if (held_ms >= BOARD_KEY_LONG_PRESS_MS)
+    {
+        Display_RequestTest();
+    }
+    else
+    {
+        Display_TogglePeriods();
+    }
+}
+#endif
 
 /* ³�����ֵ: �ðٷ�λ�������� */
 float Vpp_Robust(const float *data, uint32_t len)
@@ -332,6 +408,9 @@ Display_Init(&huart3);
 			//AdcConvEnd=0;
 		}
 
+#if BOARD_KEY_CONTROL_ENABLE
+		BoardKey_Task();
+#endif
 		Display_Task();
 		
   }

@@ -1,7 +1,7 @@
 # 当前开发状态
 
 更新时间：2026-07-30  
-版本：V1.4全量融合稳定基线
+版本：V1.4.1实体按键兼容版
 
 ## 已完成
 
@@ -17,6 +17,9 @@
 - ArmClang构建加入`__ARM_use_no_argv`，消除启动阶段semihosting `BKPT 0xAB`；
 - ST-Link已确认CPU处于正常Thread状态、Fault寄存器清零、栈指针合法、UART无ORE；
 - HMI模拟器已稳定显示复合时域波形、三根定性频谱线及全部文本。
+- 商家误发不可触摸屏后，已启用板载KEY1（PB8/BOOT0）作为实体控制；
+- KEY1短按直接复用原1T/3T按钮处理，长按直接复用原测试按钮处理；
+- 实体KEY1与HMI按钮共用同一个命令处理入口，实物验收无误。
 
 ## 当前主链路
 
@@ -47,7 +50,7 @@ A5 01 04 5A
 ```text
 Arm Compiler 6.7
 0 Error(s), 0 Warning(s)
-Code=56544, RO-data=25700, RW-data=52, ZI-data=48276
+Code=56880, RO-data=25700, RW-data=52, ZI-data=48284
 ```
 
 输出位于本地忽略目录：
@@ -67,6 +70,7 @@ projects/g474_full_integration_test/ADC/MDK-ARM/ADC/
 
 - `V1.4_FUSION_BASELINE_FREEZE_2026-07-30.md`
 - `V1.4_INTEGRATION_ARCHITECTURE.md`
+- `V1.4.1_KEY1_RELEASE_2026-07-30.md`
 
 ## 当前冻结边界
 

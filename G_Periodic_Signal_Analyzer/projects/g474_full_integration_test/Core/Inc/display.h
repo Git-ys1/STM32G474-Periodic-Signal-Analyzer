@@ -31,6 +31,16 @@ void Display_Task(void);
  */
 void Display_RedrawCurrentPage(void);
 
+/**
+ * @brief 通过原HMI按钮命令处理入口，在1T和3T之间切换。
+ */
+void Display_TogglePeriods(void);
+
+/**
+ * @brief 通过原HMI按钮命令处理入口，执行一次随机测试。
+ */
+void Display_RequestTest(void);
+
 #ifdef __cplusplus
 }
 #endif

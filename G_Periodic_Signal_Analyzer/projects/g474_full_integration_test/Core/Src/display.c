@@ -685,6 +685,43 @@ static HAL_StatusTypeDef Display_DrawDashboard(void)
 }
 
 /**
+ * @brief 处理原dashboard按钮命令。
+ *
+ * HMI触摸按钮和KEY1实体按键都调用这一入口，保证两者行为完全一致。
+ */
+static void Display_ProcessButtonCommand(uint8_t command)
+{
+    if (command == 0x01U)
+    {
+        s_visible_periods = 1U;
+        s_pending_action =
+            s_dashboard.valid
+            ? UI_ACTION_DRAW_TIME_1
+            : UI_ACTION_NONE;
+    }
+    else if (command == 0x02U)
+    {
+        s_pending_action = UI_ACTION_RELOAD_DASHBOARD;
+    }
+    else if (command == 0x03U)
+    {
+        s_visible_periods = 3U;
+        s_pending_action =
+            s_dashboard.valid
+            ? UI_ACTION_DRAW_TIME_3
+            : UI_ACTION_NONE;
+    }
+    else if (command == 0x04U)
+    {
+        /*
+         * A5 01 04 5A只触发统一接口的测试注入。
+         * 具体频率、幅值、Vpp和Vrms均不在协议解析器中赋值。
+         */
+        s_pending_action = UI_ACTION_RANDOM_TEST;
+    }
+}
+
+/**
  * @brief 处理dashboard初始化帧或按钮帧。
  */
 static void TJC_ProcessCustomFrame(const uint8_t *frame,
@@ -711,34 +748,7 @@ static void TJC_ProcessCustomFrame(const uint8_t *frame,
 
     if ((length == 4U) && (frame[1] == 0x01U))
     {
-        if (frame[2] == 0x01U)
-        {
-            s_visible_periods = 1U;
-            s_pending_action =
-                s_dashboard.valid
-                ? UI_ACTION_DRAW_TIME_1
-                : UI_ACTION_NONE;
-        }
-        else if (frame[2] == 0x02U)
-        {
-            s_pending_action = UI_ACTION_RELOAD_DASHBOARD;
-        }
-        else if (frame[2] == 0x03U)
-        {
-            s_visible_periods = 3U;
-            s_pending_action =
-                s_dashboard.valid
-                ? UI_ACTION_DRAW_TIME_3
-                : UI_ACTION_NONE;
-        }
-        else if (frame[2] == 0x04U)
-        {
-            /*
-             * A5 01 04 5A只触发统一接口的测试注入。
-             * 具体频率、幅值、Vpp和Vrms均不在协议解析器中赋值。
-             */
-            s_pending_action = UI_ACTION_RANDOM_TEST;
-        }
+        Display_ProcessButtonCommand(frame[2]);
     }
 }
 
@@ -924,6 +934,23 @@ void Display_RedrawCurrentPage(void)
     {
         s_pending_action = UI_ACTION_DRAW_DASHBOARD;
     }
+}
+
+void Display_TogglePeriods(void)
+{
+    if (s_visible_periods == 1U)
+    {
+        Display_ProcessButtonCommand(0x03U);
+    }
+    else
+    {
+        Display_ProcessButtonCommand(0x01U);
+    }
+}
+
+void Display_RequestTest(void)
+{
+    Display_ProcessButtonCommand(0x04U);
 }
 
 void Display_Task(void)

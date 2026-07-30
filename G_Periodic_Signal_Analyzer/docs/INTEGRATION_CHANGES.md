@@ -132,3 +132,32 @@ ADC.axf DB4164111854473A0E4D1913C924C6B81C51CBEFF30BCCFFAF105C42FE8C3511
 
 - `V1.4_FUSION_BASELINE_FREEZE_2026-07-30.md`
 - `V1.4_INTEGRATION_ARCHITECTURE.md`
+
+## V1.4.1不可触摸屏KEY1兼容
+
+商家误发不可触摸版本后，融合工程使用最小系统板KEY1（PB8/BOOT0）补充实体
+控制。原HMI页面、串口协议、曲线ID、FE/FD握手和信号处理主链均未改变。
+
+最终实现没有建立第二套显示状态机，而是把HMI四字节按钮帧和KEY1动作汇入
+`Display_ProcessButtonCommand()`：
+
+```text
+HMI A5 01 01/03 5A ─┐
+                     ├→ Display_ProcessButtonCommand()
+KEY1短按 1T/3T  ────┘
+
+HMI A5 01 04 5A ────┐
+                     ├→ Display_ProcessButtonCommand()
+KEY1长按测试     ────┘
+```
+
+中断回调只记录按下时刻，松开和时长判断在主循环完成；曲线绘制和UART发送仍由
+`Display_Task()`执行。编译开关`BOARD_KEY_CONTROL_ENABLE`可关闭全部实体按键
+逻辑。
+
+实物验收确认：
+
+- 短按可在1T和3T之间切换；
+- 长按可执行原测试动作；
+- HMI按钮与KEY1可以共存；
+- 两种输入方式行为一致。
