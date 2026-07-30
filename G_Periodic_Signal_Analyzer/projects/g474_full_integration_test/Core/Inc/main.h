@@ -71,8 +71,6 @@ void Error_Handler(void);
 #define RELAY3_GPIO_Port GPIOB
 #define AD835_MODE_Pin GPIO_PIN_10
 #define AD835_MODE_GPIO_Port GPIOB
-#define AD9833_CS0_Pin GPIO_PIN_12
-#define AD9833_CS0_GPIO_Port GPIOB
 #define RELAY4_Pin GPIO_PIN_12
 #define RELAY4_GPIO_Port GPIOC
 #define BUZZER_Pin GPIO_PIN_2
@@ -80,8 +78,6 @@ void Error_Handler(void);
 #define KEY_Pin GPIO_PIN_8
 #define KEY_GPIO_Port GPIOB
 #define KEY_EXTI_IRQn EXTI9_5_IRQn
-#define AD9833_CS1_Pin GPIO_PIN_9
-#define AD9833_CS1_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 

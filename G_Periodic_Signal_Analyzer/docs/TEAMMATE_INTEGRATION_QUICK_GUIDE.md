@@ -1,33 +1,55 @@
-# 队友信号处理与淘晶驰显示双向融合速查
+# 队友工程加入淘晶驰显示速查
 
-适用基线：`projects/g474_full_integration_test`（V1.4.1）。
+适用基线：V1.9.0，`projects/teammate_adc_reallynewest!`。
 
 ## 结论
 
-- 推荐以队友完整CubeMX/Keil工程为宿主，加入`analyzer_bridge`和`display`。
-- 反向融合也应复制队友最新版为新目录，再叠加显示模块；不要零散搬运ADC生成文件。
-- 两块MCU时一根Ready线不能传波形和测量结果，还需UART/SPI协议，不建议比赛采用。
+- 以队友完整CubeMX/Keil工程为底座；
+- 只加入`analyzer_bridge.c/.h`和`display.c/.h`；
+- 不零散重建ADC、DMA、TIM和IRQ；
+- 队友发新版时先独立归档，再重新叠加，禁止覆盖原始快照。
 
-## A. 显示模块加入队友工程
+## 1. 硬件
 
-硬件：PC10/TX→屏RX，PC11/RX←屏TX，GND共地，外部5 V→屏5 V；USART3保持115200、8N1。
+```text
+PC10 / USART3_TX → 屏幕RX
+PC11 / USART3_RX ← 屏幕TX
+MCU GND          ─ 屏幕GND
+外部5 V          → 屏幕5 V
+```
 
-复制`Core/Inc/analyzer_bridge.h`、`display.h`及`Core/Src/analyzer_bridge.c`、`display.c`。
+KEY1为PB8/BOOT0，高电平有效。短按切换1T/3T，长按刷新真实ADC。
 
-Keil的`Application/User`组加入两个`.c`；Include Path加入`../../Drivers/CMSIS/DSP/Include`，禁止`#include "*.c"`。
+## 2. 复制文件
 
-## `main.c`可复制代码
+```text
+Core/Inc/analyzer_bridge.h
+Core/Src/analyzer_bridge.c
+Core/Inc/display.h
+Core/Src/display.c
+```
 
-将各段放入同名CubeMX `USER CODE`区：
+Keil的`Application/User/Core`组加入两个`.c`文件。CMSIS-DSP Include Path使用：
+
+```text
+../../Drivers/CMSIS/DSP/Include
+```
+
+不得使用队友个人电脑的`E:`绝对路径，不得`#include "*.c"`。
+
+## 3. main.c头部
+
+放入对应CubeMX `USER CODE`区：
 
 ```c
 /* USER CODE BEGIN Includes */
 #include "analyzer_bridge.h"
 #include "display.h"
+#include "goertzel_sync.h"
 /* USER CODE END Includes */
 
 /* USER CODE BEGIN PD */
-#define ANALYZER_SAMPLE_RATE_HZ  1024000.0f
+#define ANALYZER_SAMPLE_RATE_HZ  1024090.0f
 #define ADC_VOLTS_PER_CODE       (3.3f / 4096.0f)
 #define BOARD_KEY_CONTROL_ENABLE 1U
 #define BOARD_KEY_DEBOUNCE_MS    30U
@@ -36,7 +58,7 @@ Keil的`Application/User`组加入两个`.c`；Include Path加入`../../Drivers/
 
 /* USER CODE BEGIN PV */
 #if defined(__ARMCC_VERSION)
-__attribute__((used)) int __ARM_use_no_argv; /* 防止BKPT 0xAB */
+__attribute__((used)) int __ARM_use_no_argv;
 #endif
 #if BOARD_KEY_CONTROL_ENABLE
 static volatile uint32_t s_key_press_tick;
@@ -45,7 +67,9 @@ static volatile uint8_t s_key_press_active;
 /* USER CODE END PV */
 ```
 
-KEY1在CubeMX设为PB8上升沿EXTI、高电平有效；放入`USER CODE BEGIN 0`：
+## 4. KEY1
+
+PB8配置为上升沿EXTI。在`USER CODE BEGIN 0`加入：
 
 ```c
 #if BOARD_KEY_CONTROL_ENABLE
@@ -57,27 +81,57 @@ void HAL_GPIO_EXTI_Callback(uint16_t pin)
         s_key_press_active = 1U;
     }
 }
+
 static void BoardKey_Task(void)
 {
+    uint32_t held_ms;
+
     if (!s_key_press_active ||
-        (HAL_GPIO_ReadPin(KEY_GPIO_Port, KEY_Pin) == GPIO_PIN_SET)) return;
-    uint32_t held_ms = HAL_GetTick() - s_key_press_tick;
+        (HAL_GPIO_ReadPin(KEY_GPIO_Port, KEY_Pin) == GPIO_PIN_SET)) {
+        return;
+    }
+
+    held_ms = HAL_GetTick() - s_key_press_tick;
     s_key_press_active = 0U;
     if (held_ms < BOARD_KEY_DEBOUNCE_MS) return;
-    if (held_ms >= BOARD_KEY_LONG_PRESS_MS) Display_RequestTest();
-    else Display_TogglePeriods();
+
+    if (held_ms >= BOARD_KEY_LONG_PRESS_MS) {
+        Display_RequestRefresh();
+    } else {
+        Display_TogglePeriods();
+    }
 }
 #endif
 ```
 
-在`USER CODE BEGIN 2`中，紧跟ADC校准、TIM3启动和`HAL_ADC_Start_DMA()`：
+实体键必须调用原显示命令接口，不得另写一套绘图或运行模式状态机。
+
+## 5. 初始化插入点
+
+队友当前底座初始化顺序：
 
 ```c
+MX_DMA_Init();
+MX_DAC1_Init();
+MX_USART3_UART_Init();
+MX_TIM3_Init();
+MX_ADC1_Init();
+```
+
+在ADC1校准、TIM3启动、ADC1 DMA启动之后加入：
+
+```c
+HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
+HAL_TIM_Base_Start(&htim3);
+HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_b, ADC_SIZE);
+
 AnalyzerBridge_Init();
 Display_Init(&huart3);
 ```
 
-在`USER CODE BEGIN 3`中，紧跟队友第一次`fft();`，必须先快照，因`Vpp_R()`会再次FFT并覆盖全局谱峰：
+## 6. 分析完成插入点
+
+第一次`fft();`之后立即保存谱峰。`Vpp_R()`内部还会FFT一次，晚保存会拿到错误结果：
 
 ```c
 float spectrum_frequencies_hz[ANALYZER_MAX_COMPONENTS] = {F, FB, FC};
@@ -85,16 +139,25 @@ float spectrum_amplitudes_v[ANALYZER_MAX_COMPONENTS] = {V, VB, VC};
 uint8_t spectrum_flag = (uint8_t)flag;
 ```
 
-紧跟`vpp = Vpp_Robust(...)`和`Vrms = Vpp_R()`，并放在重启ADC DMA之前：
+完成`vpp`和`Vrms`后、重新启动ADC1 DMA前发布：
 
 ```c
 AnalyzerBridge_PublishReal(
-    adc_b, ADC_SIZE, ADC_VOLTS_PER_CODE, ANALYZER_SAMPLE_RATE_HZ,
-    vpp, Vrms, spectrum_flag,
-    spectrum_frequencies_hz, spectrum_amplitudes_v);
+    adc_b,
+    ADC_SIZE,
+    ADC_VOLTS_PER_CODE,
+    ANALYZER_SAMPLE_RATE_HZ,
+    vpp,
+    Vrms,
+    spectrum_flag,
+    spectrum_frequencies_hz,
+    spectrum_amplitudes_v
+);
 ```
 
-在`while(1)`末尾加入：
+必须传原始实采`adc_b[2048]`。桥接层会用所有2048点做相关频率细化和256槽相位折叠。
+
+## 7. 主循环末尾
 
 ```c
 #if BOARD_KEY_CONTROL_ENABLE
@@ -103,11 +166,29 @@ BoardKey_Task();
 Display_Task();
 ```
 
-`display.c`已实现USART3的两个HAL UART回调；若队友也定义，必须合并并按`huart->Instance`分发。
+## 8. UART回调
 
-## B. 队友代码加入我的工程
+`display.c`已经实现USART3接收完成和错误回调。若队友也实现HAL UART回调，必须合并并按`huart->Instance`分发；禁止保留两个同名回调。
 
-1. 推荐：复制`teammate_adc_newest`为新融合目录，再执行方案A；这是可持续的“反向融合”。
-2. 坚持以显示工程为宿主时，须完整迁入`.ioc`、ADC2/TIM3/DMA、DAC/AD9833、IRQ、Drivers、DSP和Keil配置。
-3. 换板时模拟前端接PA7/ADC2_IN4并共地；其他外设按队友原理图迁移，不能只接“计算完成”线。
-4. 队友发新版时新建快照，再叠加四个文件和上述钩子；Clean Build后回归1T、3T、测试、时域、频谱、文本和FE/FD。
+## 9. Keil工程
+
+- 保留队友`goertzel_sync.c`；
+- 加入`analyzer_bridge.c`和`display.c`；
+- 保留仓库内`arm_cortexM4lf_math.lib`；
+- 保留`__ARM_use_no_argv`；
+- 使用ArmClang 6.7和相对DSP路径；
+- Clean Rebuild必须为0 errors、0 warnings。
+
+## 10. 回归顺序
+
+```text
+上电
+→ dashboard初始化并上报两条曲线ID
+→ 1T
+→ 3T
+→ 长按KEY1刷新真实ADC
+→ 检查时域、频谱和六项文本
+→ 检查FE/FD且无0x12/0x1A/0x24
+```
+
+若屏幕无图，先用ST-Link检查CPU Fault、发布序号和USART3状态，不要先重写显示协议。

@@ -1,6 +1,6 @@
 # CMSIS-DSP依赖审计
 
-更新时间：2026-07-30  
+更新时间：2026-07-31
 融合工程：`projects/g474_full_integration_test`
 
 ## 实际依赖
@@ -14,6 +14,15 @@
 - `arm_max_f32()`
 - `arm_rms_f32()`
 - `arm_cfft_sR_f32_len2048`
+
+队友ADC1新快照还增加自有源码：
+
+- `goertzel_sync.c/.h`
+- `goertzel_sync()`
+- `GoertzelResult`
+
+Goertzel实现仍调用标准数学函数，但不是额外的第三方库；已加入融合工程
+Keil的`Application/User/Core`组。
 
 `arm_min_f32()`仅存在于注释代码中，不参与当前构建。
 
@@ -85,3 +94,17 @@ ZI-data=46108
 
 已成功生成 `ADC.hex` 和 `ADC.axf`，最终链接未出现DSP未定义符号。
 
+## V1.9 ADC1底座复验
+
+2026-07-31将队友ADC1/Goertzel快照同步至融合工程后再次Clean Rebuild：
+
+```text
+0 Error(s), 0 Warning(s)
+Code=62276
+RO-data=59000
+RW-data=52
+ZI-data=50756
+```
+
+这次构建同时编译了`goertzel_sync.c`、`analyzer_bridge.c`和`display.c`，
+证明队友新增源码与原CMSIS-DSP、显示叠加层可在同一Keil工程中链接。

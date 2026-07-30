@@ -1079,6 +1079,11 @@ void Display_TogglePeriods(void)
     }
 }
 
+void Display_RequestRefresh(void)
+{
+    Display_ProcessButtonCommand(0x02U);
+}
+
 void Display_RequestTest(void)
 {
     Display_ProcessButtonCommand(0x04U);

@@ -1,80 +1,87 @@
 # 当前开发状态
 
-更新时间：2026-07-30  
-版本：V1.4.1实体按键兼容版
+更新时间：2026-07-31
+版本：V1.9.0队友ADC1底座融合版
 
-## 已完成
+## 本轮底座
 
-- 以`teammate_adc_newest`为硬件、采集和算法底座建立独立融合工程；
-- 保留ADC2、TIM3 TRGO、DMA循环采集、2048点FFT、Vpp和真RMS；
-- 新增`AnalyzerBridge`，用统一`AnalyzerResult`承接真实结果与测试结果；
-- 在第一次FFT后立即保存谱峰，避免`Vpp_R()`内部二次FFT覆盖频谱输出；
-- dashboard单页同时显示时域、频谱、Upp、Urms、基频和最多三个谱峰；
-- 1T、3T、刷新和测试四个按钮均已实测；
-- 测试按钮内置六组一致场景，波形、Vpp、RMS和谱峰来自同一场景定义；
-- UART3接收改为中断，避免2048点FFT期间未及时读DR造成ORE；
-- 大型结果结构体改为静态存储，消除1 KB启动栈溢出；
-- ArmClang构建加入`__ARM_use_no_argv`，消除启动阶段semihosting `BKPT 0xAB`；
-- ST-Link已确认CPU处于正常Thread状态、Fault寄存器清零、栈指针合法、UART无ORE；
-- HMI模拟器已稳定显示复合时域波形、三根定性频谱线及全部文本。
-- 商家误发不可触摸屏后，已启用板载KEY1（PB8/BOOT0）作为实体控制；
-- KEY1短按直接复用原1T/3T按钮处理，长按直接复用原测试按钮处理；
-- 实体KEY1与HMI按钮共用同一个命令处理入口，实物验收无误。
+- 原始快照：`projects/teammate_adc_reallynewest!`
+- 原始快照提交：`44fc481`
+- 融合工程：`projects/g474_full_integration_test`
+- 原则：队友最新版负责采集与信号分析；我们只叠加桥接、显示和实体按键。
+
+## 已融合
+
+- ADC2/PA7/DMA1 Channel 2升级为队友最新的ADC1/PA0/DMA1 Channel 1；
+- ADC1启用2倍过采样、右移1位、TIM3单次触发和6.5周期采样时间；
+- FFT谱峰幅值升级为峰值附近±8个频点的平方和开方；
+- Vpp鲁棒统计升级为排序后第1～10个低值和高值的均值差；
+- RMS整数周期长度采用`round()`；
+- 加入队友`goertzel_sync.c/.h`，三路结果在真实`VO[2048]`上计算但暂不替换显示口径；
+- 真实`adc_b[2048]`继续进入256槽完整缓冲区相位折叠；
+- KEY1短按复用1T/3T命令，长按改为复用“刷新真实ADC”命令。
+
+## 交叉对照后保留的历史修复
+
+- 第一次FFT后立即快照谱峰，防止`Vpp_R()`二次FFT覆盖；
+- `AnalyzerResult`和大型临时缓冲保持静态存储，避免1 KB主栈溢出；
+- 保留`__ARM_use_no_argv`，避免ArmClang启动阶段`BKPT 0xAB`；
+- USART3保持中断收字节，避免FFT期间主循环轮询造成ORE；
+- HMI与KEY1统一进入`Display_ProcessButtonCommand()`，不维护第二套状态机；
+- dashboard继续动态接收两条曲线真实数字ID；
+- 保留时域和频谱各自的横向写入方向补偿；
+- 保留`addt → FE → 原始数据 → FD`握手；
+- Keil继续使用本机ArmClang 6.7和仓库相对CMSIS-DSP路径。
 
 ## 当前主链路
 
 ```text
-ADC2 + TIM3 + DMA
-→ fft()
-→ 快照F/V、FB/VB、FC/VC
-→ Vpp与Vrms
+TIM3 TRGO
+→ ADC1 + DMA1 Channel 1
+→ adc_b[2048]
+→ fft()并快照谱峰
+→ Vpp_Robust() / Vpp_R()
 → AnalyzerBridge_PublishReal()
-→ AnalyzerResult
+→ 相关搜索细化频率
+→ 2048点相位折叠到256槽
 → Display_Task()
-→ TJC cle/addt + FE/FD
 → USART3
 → dashboard
 ```
 
-测试链路：
-
-```text
-A5 01 04 5A
-→ AnalyzerBridge_RunRandomTest()
-→ 锁存测试快照
-→ 同一Display_Task()路径
-```
-
-## 最终构建
+## 构建与运行证据
 
 ```text
 Arm Compiler 6.7
 0 Error(s), 0 Warning(s)
-Code=56880, RO-data=25700, RW-data=52, ZI-data=48284
+Code=62276
+RO-data=59000
+RW-data=52
+ZI-data=50756
 ```
 
-输出位于本地忽略目录：
+固件：
 
 ```text
-projects/g474_full_integration_test/ADC/MDK-ARM/ADC/
+ADC.hex
+长度：341332 bytes
+SHA-256：B3C0F656FCEB10C57E68EE742B9AFCA77A8E0D93683D79F3EB8B2A80A403C803
 ```
 
-## 实测证据
+STM32CubeProgrammer 2.22.0已完成SWD下载、校验和复位。HOTPLUG运行态检查：
 
-- 10.5/31.5/42 kHz复合场景：Upp 126.0 mV，Urms 40.93 mV；
-- 120/240/480 kHz复合场景：Upp 136.1 mV，Urms 45.28 mV；
-- 两组均正确显示1T/3T、复合波形、三根谱线和对应文本；
-- 曲线透传均完成`FE FF FF FF`与`FD FF FF FF`握手。
+- 3秒内`s_next_sequence`：`0x041A → 0x0435`；
+- CFSR：`0x00000000`；
+- HFSR：`0x00000000`。
 
-详见：
+这证明ADC1/DMA/分析/桥接链路持续运行，且没有HardFault或可配置Fault。
 
-- `V1.4_FUSION_BASELINE_FREEZE_2026-07-30.md`
-- `V1.4_INTEGRATION_ARCHITECTURE.md`
-- `V1.4.1_KEY1_RELEASE_2026-07-30.md`
+## 尚待实际ADC联调确认
 
-## 当前冻结边界
+- PA0/ADC1_IN1的模拟前端幅值、偏置和频响；
+- 10～500 kHz范围内FFT频率与幅值误差；
+- Goertzel结果是否经标定后替换FFT幅值；
+- 低相位覆盖频点的相位折叠可信度；
+- 队友工程中未使用但仍保留的AD9833源码与已删除GPIO定义之间的潜在风险。
 
-- 不再重构已稳定的HMI协议、FE/FD握手或UART接收框架；
-- 不反向修改`tjc_display_demo`和队友原始快照；
-- 后续只做真实信号标定、算法精度验证、测试模式关闭和最终实体屏回归；
-- 任何后续改动必须先分支/提交，再按“上电→1T→3T→测试→刷新”回归。
+后续不得从旧V1.4/V1.8重新融合，应直接从V1.9.0继续实际ADC联调。

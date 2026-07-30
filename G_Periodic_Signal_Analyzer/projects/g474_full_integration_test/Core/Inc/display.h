@@ -37,6 +37,11 @@ void Display_RedrawCurrentPage(void);
 void Display_TogglePeriods(void);
 
 /**
+ * @brief 通过原HMI按钮命令处理入口，恢复真实ADC自动刷新。
+ */
+void Display_RequestRefresh(void);
+
+/**
  * @brief 通过原HMI按钮命令处理入口，启动随机测试自动刷新。
  */
 void Display_RequestTest(void);

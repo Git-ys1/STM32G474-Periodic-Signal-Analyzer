@@ -396,6 +396,11 @@
           <GroupName>Application/User/Core</GroupName>
           <Files>
             <File>
+              <FileName>goertzel_sync.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../../Core/Src/goertzel_sync.c</FilePath>
+            </File>
+            <File>
               <FileName>main.c</FileName>
               <FileType>1</FileType>
               <FilePath>../../Core/Src/main.c</FilePath>

@@ -32,6 +32,7 @@
 #include "arm_const_structs.h"
 #include "analyzer_bridge.h"
 #include "display.h"
+#include "goertzel_sync.h"
 #include "math.h"
 #include "stdio.h"
 /* USER CODE END Includes */
@@ -52,11 +53,11 @@
 #define IN4_O() HAL_GPIO_WritePin(GPIOC,GPIO_PIN_12,GPIO_PIN_RESET)
 #define IN4_C() HAL_GPIO_WritePin(GPIOC,GPIO_PIN_12,GPIO_PIN_SET)
 #define ADC_SIZE 2048
-#define ANALYZER_SAMPLE_RATE_HZ 1024000.0f
+#define ANALYZER_SAMPLE_RATE_HZ 1024090.0f
 #define ADC_VOLTS_PER_CODE      (3.3f / 4096.0f)
 /*
  * KEY1实体按键控制总开关：
- * 1U：启用PB8短按切换1T/3T、长按执行原“测试”按钮命令；
+ * 1U：启用PB8短按切换1T/3T、长按执行原“刷新”按钮命令；
  * 0U：完全关闭本功能，保留原有HMI与显示链路。
  */
 #define BOARD_KEY_CONTROL_ENABLE 1U
@@ -139,31 +140,35 @@ void fft()
 	index=0;
 	max=output[1];
 	arm_max_f32(&output[1],ADC_SIZE/2-1,&max,&index);
+	float sum=0;
 	
 	for(int i=-8;i<9;i++)
 		{
-			output[index+i+1]=0;
+			sum+=output[index+i+1]*output[index+i+1];output[index+i+1]=0;
 		}
 	F=(index+1)*1024000.0/2048.0;
-	V=2.0*max/2048.0;
+	//V=2.0*max/2048.0;
+	V=2.0*sqrtf(sum)/2048.0;
 	
 	arm_max_f32(&output[1],ADC_SIZE/2-1,&max,&index);
-		
+	sum=0;
 	for(int i=-8;i<9;i++)
 		{
-			output[index+i+1]=0;
+			sum+=output[index+i+1]*output[index+i+1];output[index+i+1]=0;
 		}
 	FB=(index+1)*1024000.0/2048.0;
-	VB=2.0*max/2048.0;
+	//VB=2.0*max/2048.0;
+	VB=2.0*sqrtf(sum)/2048.0;
 	
 	arm_max_f32(&output[1],ADC_SIZE/2-1,&max,&index);
-		
+	sum=0;
 	for(int i=-8;i<9;i++)
 		{
-			output[index+i+1]=0;
+			sum+=output[index+i+1]*output[index+i+1];output[index+i+1]=0;
 		}
 	FC=(index+1)*1024000.0/2048.0;
-	VC=2.0*max/2048.0;
+	//VC=2.0*max/2048.0;
+	VC=2.0*sqrtf(sum)/2048.0;
 	
 	if(VC<0.004)
 		flag=2;
@@ -180,10 +185,10 @@ void fft()
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
-	if(hadc == &hadc2)
+	if(hadc == &hadc1)
 	{
 		AdcConvEnd=1;
-HAL_ADC_Stop_DMA(&hadc2);
+HAL_ADC_Stop_DMA(&hadc1);
 	}
 }
 
@@ -209,7 +214,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
  * @brief 在主循环中检测KEY1松开并执行短按/长按动作。
  *
  * 按住不足30 ms视为抖动；30~999 ms执行原1T/3T按钮命令；
- * 按住至少1000 ms后松开，执行原“测试”按钮命令。
+ * 按住至少1000 ms后松开，执行原“刷新”按钮命令，恢复真实ADC结果。
  */
 static void BoardKey_Task(void)
 {
@@ -237,7 +242,7 @@ static void BoardKey_Task(void)
 
     if (held_ms >= BOARD_KEY_LONG_PRESS_MS)
     {
-        Display_RequestTest();
+        Display_RequestRefresh();
     }
     else
     {
@@ -271,12 +276,12 @@ float Vpp_Robust(const float *data, uint32_t len)
     /* 3. ȡ 1% �� 99% ��λ��, ���˼������� */
 		float idx_low=0 ;           /* 1% λ�� */
     float idx_high=0; /* 99% λ�� */
-		for (i = 0; i < 5; i++) {
+		for (i = 1; i < 11; i++) {
 			idx_low+=sorted[i];
 			idx_high+=sorted[2047-i];
 		}
-		idx_low/=5.0;
-		idx_high/=5.0;
+		idx_low/=10.0;
+		idx_high/=10.0;
     return idx_high- idx_low;
 }
 
@@ -287,7 +292,7 @@ float Vpp_R()
 			float fm=F;
 			uint32_t cycles = (uint32_t)floor(2048.0 * fm / 1024000.0);
 			double exact_len = cycles *  1024000.0 / fm;
-			valid_len = (uint32_t)floor(exact_len);
+			valid_len = (uint32_t)round(exact_len);
 			discard_len = 2048 - valid_len;
 			for(int i=0;i<discard_len;i++)
 				VO[2047-i]=0;
@@ -336,12 +341,12 @@ int main(void)
   MX_DMA_Init();
   MX_DAC1_Init();
   MX_USART3_UART_Init();
-  MX_ADC2_Init();
   MX_TIM3_Init();
+  MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
-HAL_ADCEx_Calibration_Start(&hadc2, ADC_SINGLE_ENDED);
+HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
 HAL_TIM_Base_Start(&htim3);
-HAL_ADC_Start_DMA(&hadc2,(uint32_t*)adc_b,2048);
+HAL_ADC_Start_DMA(&hadc1,(uint32_t*)adc_b,2048);
 AnalyzerBridge_Init();
 Display_Init(&huart3);
   /* USER CODE END 2 */
@@ -358,6 +363,9 @@ Display_Init(&huart3);
 			float spectrum_frequencies_hz[ANALYZER_MAX_COMPONENTS];
 			float spectrum_amplitudes_v[ANALYZER_MAX_COMPONENTS];
 			uint8_t spectrum_flag;
+			GoertzelResult goertzel_a;
+			GoertzelResult goertzel_b;
+			GoertzelResult goertzel_c;
 
 			for (int i=0; i < 2048; i++)
 			{
@@ -384,7 +392,35 @@ Display_Init(&huart3);
 
 			float vpp =Vpp_Robust(VO,2048)  ;            /* ���ֵ */
 
-			
+			/*
+			 * 保留队友新版的Goertzel精测链路。当前显示仍使用队友FFT的
+			 * 三组幅值，避免在未完成实机标定前改变对外结果口径。
+			 */
+			goertzel_a =
+				goertzel_sync(
+					VO,
+					ADC_SIZE,
+					ANALYZER_SAMPLE_RATE_HZ,
+					spectrum_frequencies_hz[0]
+				);
+			goertzel_b =
+				goertzel_sync(
+					VO,
+					ADC_SIZE,
+					ANALYZER_SAMPLE_RATE_HZ,
+					spectrum_frequencies_hz[1]
+				);
+			goertzel_c =
+				goertzel_sync(
+					VO,
+					ADC_SIZE,
+					ANALYZER_SAMPLE_RATE_HZ,
+					spectrum_frequencies_hz[2]
+				);
+			(void)goertzel_a;
+			(void)goertzel_b;
+			(void)goertzel_c;
+
 			float Vrms=Vpp_R();
 
 			/*
@@ -404,7 +440,7 @@ Display_Init(&huart3);
 			);
 
 			AdcConvEnd=0;
-			HAL_ADC_Start_DMA(&hadc2,(uint32_t*)adc_b,2048);
+			HAL_ADC_Start_DMA(&hadc1,(uint32_t*)adc_b,2048);
 			//AdcConvEnd=0;
 		}
 
