@@ -1,0 +1,321 @@
+{
+  "schema_version": 1,
+  "source_workbook": "tests/三组实际ADC数据.xlsx",
+  "source_sheet": "Sheet1",
+  "sample_rate_hz": 1024090.0,
+  "volts_per_code": 0.0008056640625,
+  "sample_count_per_capture": 2048,
+  "hex_recovery_rule": {
+    "digits_only_numeric_cells": "interpret the displayed integer token as hexadecimal",
+    "scientific_style_cells": "reverse exact power-of-ten values to original 1eN hexadecimal tokens",
+    "scientific_cell_count": 15,
+    "scientific_cells": [
+      {
+        "cell": "C30",
+        "stored_value": 1000.0,
+        "recovered_token": "1e3"
+      },
+      {
+        "cell": "C47",
+        "stored_value": 10000000.0,
+        "recovered_token": "1e7"
+      },
+      {
+        "cell": "C320",
+        "stored_value": 10.0,
+        "recovered_token": "1e1"
+      },
+      {
+        "cell": "C354",
+        "stored_value": 1.0,
+        "recovered_token": "1e0"
+      },
+      {
+        "cell": "C559",
+        "stored_value": 1.0,
+        "recovered_token": "1e0"
+      },
+      {
+        "cell": "C832",
+        "stored_value": 100.0,
+        "recovered_token": "1e2"
+      },
+      {
+        "cell": "C866",
+        "stored_value": 1000.0,
+        "recovered_token": "1e3"
+      },
+      {
+        "cell": "C1054",
+        "stored_value": 1000.0,
+        "recovered_token": "1e3"
+      },
+      {
+        "cell": "C1071",
+        "stored_value": 1.0,
+        "recovered_token": "1e0"
+      },
+      {
+        "cell": "C1088",
+        "stored_value": 100.0,
+        "recovered_token": "1e2"
+      },
+      {
+        "cell": "C1310",
+        "stored_value": 10000.0,
+        "recovered_token": "1e4"
+      },
+      {
+        "cell": "C1344",
+        "stored_value": 1000.0,
+        "recovered_token": "1e3"
+      },
+      {
+        "cell": "C1549",
+        "stored_value": 1.0,
+        "recovered_token": "1e0"
+      },
+      {
+        "cell": "C1566",
+        "stored_value": 10.0,
+        "recovered_token": "1e1"
+      },
+      {
+        "cell": "C2010",
+        "stored_value": 100.0,
+        "recovered_token": "1e2"
+      }
+    ]
+  },
+  "captures": [
+    {
+      "capture": "A",
+      "capture_name": "A_58k_h8",
+      "note": "58 kHz基波150 mVpp；8次谐波50 mVpp",
+      "sample_count": 2048,
+      "adc_min_code": 178,
+      "adc_max_code": 477,
+      "adc_mean_code": 335.72021484375,
+      "adc_peak_to_peak_codes": 299,
+      "nominal_fundamental_hz": 58000.0,
+      "teammate_fft_components": [
+        {
+          "frequency_hz": 58000.0,
+          "amplitude_mvpk": 73.91341660190484
+        },
+        {
+          "frequency_hz": 457500.0,
+          "amplitude_mvpk": 6.244222081234012
+        },
+        {
+          "frequency_hz": 464000.0,
+          "amplitude_mvpk": 19.106908637432955
+        }
+      ],
+      "refined_fundamental_hz": 57981.601428266826,
+      "harmonic_orders": [
+        1,
+        8
+      ],
+      "nominal_amplitudes_mvpk": [
+        75.0,
+        25.0
+      ],
+      "robust_fit_amplitudes_mvpk": {
+        "1": 73.86259128192758,
+        "8": 19.260468673961324
+      },
+      "raw_fit": {
+        "residual_rms_mv": 14.226943348303069,
+        "robust_scale_mv": 13.913969668679226,
+        "minimum_weight": 0.3642295743694565,
+        "downweighted_count": 319,
+        "interleave_stability_rmse_mv": 1.8400004066681672
+      },
+      "huber": {
+        "robust_scale_mv": 12.788118094825828,
+        "huber_delta_mv": 17.20001883754074,
+        "downweighted_sample_count": 339,
+        "downweighted_fraction": 0.16552734375,
+        "minimum_sample_weight": 0.33972459283206063
+      },
+      "projection": {
+        "harmonic_orders": [
+          1,
+          8
+        ],
+        "amplitudes_mvpk": [
+          73.90828914405911,
+          19.109232708699047
+        ],
+        "residual_rms_mv": 4.50002845644991,
+        "residual_max_mv": 15.341026914848982
+      },
+      "firmware_float32_projection_max_error_mv": 0.00022383434636097377,
+      "ordinary_extrema_count": 140,
+      "huber_extrema_count": 138,
+      "projected_extrema_count": 16,
+      "reference_extrema_count": 16
+    },
+    {
+      "capture": "B",
+      "capture_name": "B_120k_h3_h4",
+      "note": "120 kHz基波150 mVpp；3次、4次谐波各50 mVpp",
+      "sample_count": 2048,
+      "adc_min_code": 195,
+      "adc_max_code": 470,
+      "adc_mean_code": 338.3818359375,
+      "adc_peak_to_peak_codes": 275,
+      "nominal_fundamental_hz": 120000.0,
+      "teammate_fft_components": [
+        {
+          "frequency_hz": 120000.0,
+          "amplitude_mvpk": 73.80747630540579
+        },
+        {
+          "frequency_hz": 360000.0,
+          "amplitude_mvpk": 21.788771201029903
+        },
+        {
+          "frequency_hz": 480000.0,
+          "amplitude_mvpk": 19.336900726803822
+        }
+      ],
+      "refined_fundamental_hz": 120014.54935093159,
+      "harmonic_orders": [
+        1,
+        3,
+        4
+      ],
+      "nominal_amplitudes_mvpk": [
+        75.0,
+        25.0,
+        25.0
+      ],
+      "robust_fit_amplitudes_mvpk": {
+        "1": 73.60173927551755,
+        "3": 21.503306926312153,
+        "4": 19.32227914905024
+      },
+      "raw_fit": {
+        "residual_rms_mv": 14.476665704022707,
+        "robust_scale_mv": 13.76185818966518,
+        "minimum_weight": 0.3346241136219202,
+        "downweighted_count": 327,
+        "interleave_stability_rmse_mv": 1.1333696003015528
+      },
+      "huber": {
+        "robust_scale_mv": 13.455093499354263,
+        "huber_delta_mv": 18.097100756631484,
+        "downweighted_sample_count": 327,
+        "downweighted_fraction": 0.15966796875,
+        "minimum_sample_weight": 0.36283071972575626
+      },
+      "projection": {
+        "harmonic_orders": [
+          1,
+          3,
+          4
+        ],
+        "amplitudes_mvpk": [
+          73.66556974699081,
+          21.537409796712563,
+          19.28984112754854
+        ],
+        "residual_rms_mv": 3.361718819742,
+        "residual_max_mv": 11.154060264269745
+      },
+      "firmware_float32_projection_max_error_mv": 0.0001607815188862105,
+      "ordinary_extrema_count": 144,
+      "huber_extrema_count": 138,
+      "projected_extrema_count": 6,
+      "reference_extrema_count": 6
+    },
+    {
+      "capture": "C",
+      "capture_name": "C_60k_h2_h7",
+      "note": "60 kHz基波100 mVpp；2次70 mVpp；7次80 mVpp",
+      "sample_count": 2048,
+      "adc_min_code": 164,
+      "adc_max_code": 491,
+      "adc_mean_code": 337.34033203125,
+      "adc_peak_to_peak_codes": 327,
+      "nominal_fundamental_hz": 60000.0,
+      "teammate_fft_components": [
+        {
+          "frequency_hz": 60000.0,
+          "amplitude_mvpk": 49.54790577491955
+        },
+        {
+          "frequency_hz": 120000.0,
+          "amplitude_mvpk": 34.404910355357615
+        },
+        {
+          "frequency_hz": 420000.0,
+          "amplitude_mvpk": 32.78887261108813
+        }
+      ],
+      "refined_fundamental_hz": 59997.88848001971,
+      "harmonic_orders": [
+        1,
+        2,
+        7
+      ],
+      "nominal_amplitudes_mvpk": [
+        50.0,
+        35.0,
+        40.0
+      ],
+      "robust_fit_amplitudes_mvpk": {
+        "1": 49.52993047288551,
+        "2": 34.397149890140085,
+        "7": 32.834755957529616
+      },
+      "raw_fit": {
+        "residual_rms_mv": 14.602509002389587,
+        "robust_scale_mv": 14.575532414111777,
+        "minimum_weight": 0.43514404814702984,
+        "downweighted_count": 316,
+        "interleave_stability_rmse_mv": 2.0785102689051844
+      },
+      "huber": {
+        "robust_scale_mv": 13.6595470970557,
+        "huber_delta_mv": 18.372090845539915,
+        "downweighted_sample_count": 320,
+        "downweighted_fraction": 0.15625,
+        "minimum_sample_weight": 0.4198383213907409
+      },
+      "projection": {
+        "harmonic_orders": [
+          1,
+          2,
+          7
+        ],
+        "amplitudes_mvpk": [
+          49.56209127985641,
+          34.37155353559258,
+          32.6759971869078
+        ],
+        "residual_rms_mv": 3.590764976318862,
+        "residual_max_mv": 10.432305994384294
+      },
+      "firmware_float32_projection_max_error_mv": 0.0002610026443079505,
+      "ordinary_extrema_count": 126,
+      "huber_extrema_count": 124,
+      "projected_extrema_count": 14,
+      "reference_extrema_count": 14
+    }
+  ],
+  "acceptance": {
+    "projection_max_reference_rmse_mv": 0.25,
+    "projection_max_extra_extrema": 0,
+    "maximum_interleave_stability_rmse_mv": 2.5,
+    "firmware_float32_projection_max_error_mv": 0.01
+  },
+  "recommendation": {
+    "algorithm": "Huber + selected harmonic projection",
+    "reason": "It removes off-model phase-bin jitter while preserving the fitted coefficients of the fundamental and reported integer harmonics. It is cheaper and safer on the MCU than a full 2048-point robust least-squares solve.",
+    "default_mode_change": false,
+    "measurement_values_unchanged": true
+  }
+}

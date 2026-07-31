@@ -1,87 +1,50 @@
 # G题周期信号测量分析装置
 
-本仓库保存2026年电赛G题的队友采集/分析快照、淘晶驰显示基线和当前可烧录的全量融合工程。主控为STM32G474VET6，显示器为淘晶驰X2系列7英寸串口屏TJC8048X270_011R。
+STM32G474VET6 + 淘晶驰 7 英寸串口屏的周期信号测量与显示工程。
 
-> 新会话、上下文压缩后恢复或换人接管时，必须先阅读
-> [新会话永久交接入口](docs/HANDOFF/README.md)。该目录集中记录赛题口径、
-> 工作区、职责、硬件、软件架构、故障史、当前问题和下一轮行动；不得仅凭旧聊天
-> 摘要或历史任务书修改当前融合工程。
-
-## 当前版本
-
-当前融合版本为 **V2.1.0普通/Huber鲁棒折叠切换版（2026-07-31）**。
-
-本版以V1.9.0队友ADC1融合底座为基础，继续遵循“队友工程作为底座、我们的
-显示功能作为叠加层”：
-
-- 队友底座：ADC1（PA0/IN1）、TIM3 TRGO、DMA1 Channel 1、2048点采集、CMSIS-DSP FFT、Vpp、RMS和Goertzel源码；
-- 我们叠加：`AnalyzerBridge`、256槽完整缓冲区相位折叠、淘晶驰dashboard显示、USART3协议和KEY1控制；
-- KEY1短按复用原1T/3T命令，长按复用原“刷新”命令，恢复真实ADC自动显示；
-- 时域新增无触发、上升过零、下降过零和正峰值四种相位锚，默认上升过零；
-- 淘晶驰下拉框使用`A5 02 07 mode 5A`五字节帧直接发送最终触发模式；
-- PC端完成两遍Huber折叠的72组干净/污染对照，中高覆盖孤立毛刺显示RMSE
-  中位改善约55%，同时保留低覆盖与连续异常的失败边界；
-- STM32加入默认关闭的普通/Huber状态开关协议`A5 02 08 enabled 5A`，只改变
-  时域波形重建，不修改Upp、Urms、频率和频谱；
-- 保留第一次FFT谱峰快照，避免`Vpp_R()`二次FFT覆盖对外结果；
-- 保留`__ARM_use_no_argv`、静态大对象、UART中断接收、动态曲线ID和FE/FD握手等已验证修复；
-- Keil ArmClang 6.7 Clean Build通过：0 errors、0 warnings；
-- 固件已通过ST-Link下载、校验和复位；
-- 运行态发布序号3秒内由`0x041A`增长至`0x0435`，CFSR/HFSR均为0。
-
-详细说明见：
-
-- [V1.9队友ADC1底座融合发布说明](docs/V1.9_ADC1_TEAMMATE_BASE_INTEGRATION.md)
-- [V2.0时域触发与相位锚发布说明](docs/V2_TRIGGER_PHASE_ANCHOR_2026-07-31.md)
-- [V2.1普通/Huber折叠状态开关发布说明](docs/V2.1_HUBER_FOLD_SWITCH_2026-07-31.md)
-- [当前开发状态](docs/CURRENT_STATUS.md)
-- [队友工程双向融合速查](docs/TEAMMATE_INTEGRATION_QUICK_GUIDE.md)
-- [队友输出映射](docs/TEAMMATE_OUTPUT_MAP.md)
-- [CMSIS-DSP依赖审计](docs/DSP_DEPENDENCY_AUDIT.md)
-- [V1.8波形实验室与时域方向修复](docs/V1.8_WAVEFORM_LAB_AND_TIME_DIRECTION_RELEASE.md)
-- [永久交接文档包](docs/HANDOFF/README.md)
-- [真实ADC首次联调问题审计](docs/REAL_ADC_FIRST_INTEGRATION_REVIEW_2026-07-31.md)
+当前工作区版本：**V2.3 结构整理版**。
+唯一主线固件位于 [`firmware/`](firmware/README.md)，不要再从历史 demo 或
+队友快照中直接开发。
 
 ## 目录
 
+| 路径 | 定位 | 是否参与当前主线 |
+|---|---|---|
+| [`firmware/`](firmware/README.md) | 唯一可编译、烧录、继续开发的 STM32 工程 | 是 |
+| [`teammate/`](teammate/README.md) | 队友当前快照、旧快照和收到的原始压缩包 | 只读参考 |
+| [`docs/`](docs/README.md) | 架构、融合、验证、版本、报告和交接文档 | 是 |
+| [`plan/`](plan/README.md) | 用户编写的各阶段任务书，保持原组织 | 只读依据 |
+| [`tools/`](tools/README.md) | PC 端波形、覆盖率和真实 ADC 分析工具 | 是 |
+| [`tests/`](tests/README.md) | 测试输入和工具生成的验证结果 | 是 |
+| [`deliverables/`](deliverables/README.md) | 发给队友的独立交付包 | 按版本使用 |
+| [`tmp/`](tmp/README.md) | 并行任务的临时构建源和中间稿，默认不提交 | 否 |
+| [`archive/`](archive/README.md) | 已废弃工程和仅供追溯的内容 | 否 |
+| [`.gitignore`](.gitignore) | 构建产物、缓存和可重建结果忽略规则 | 是 |
+
+## 当前主链
+
 ```text
-projects/
-├─ tjc_display_demo/              独立显示回归基线
-├─ teammate_adc_reference/        队友早期参考快照
-├─ teammate_adc_newest/           队友上一版原始快照
-├─ teammate_adc_reallynewest!/    本次ADC1/Goertzel原始快照
-└─ g474_full_integration_test/    当前V2.1.0全量融合与烧录工程
+TIM3 → ADC1/PA0 → DMA adc_b[2048]
+→ 队友 FFT / Vpp / RMS
+→ AnalyzerBridge
+→ Huber + 已识别谐波投影
+→ Display_Task
+→ USART3 → 淘晶驰 dashboard
 ```
 
-队友原始快照独立归档，不在原目录内做显示融合。正式运行与后续联调以`g474_full_integration_test`为唯一融合工程。
+## 快速入口
 
-## 当前主链路
+| 目的 | 入口 |
+|---|---|
+| 编译和烧录 | [`firmware/README.md`](firmware/README.md) |
+| 查看当前状态 | [`docs/00_overview/CURRENT_STATUS.md`](docs/00_overview/CURRENT_STATUS.md) |
+| 新会话接管 | [`docs/06_handoff/README.md`](docs/06_handoff/README.md) |
+| 队友融合 | [`docs/02_integration/TEAMMATE_INTEGRATION_QUICK_GUIDE.md`](docs/02_integration/TEAMMATE_INTEGRATION_QUICK_GUIDE.md) |
+| 查看V2.2算法 | [`docs/04_releases/V2.2_REAL_ADC_HARMONIC_PROJECTION_2026-07-31.md`](docs/04_releases/V2.2_REAL_ADC_HARMONIC_PROJECTION_2026-07-31.md) |
 
-```text
-TIM3 TRGO
-→ ADC1 PA0/IN1（2倍过采样）
-→ DMA1 Channel 1采集adc_b[2048]
-→ 队友fft()提取2～3个谱峰（±8频点RSS幅值）
-→ 立即快照F/V、FB/VB、FC/VC
-→ 队友Vpp_Robust()与Vpp_R()
-→ AnalyzerBridge_PublishReal(adc_b, ...)
-→ 相关搜索细化折叠频率
-→ 2048个真实ADC点普通折叠，或可选Huber第二遍折叠到256个相位槽
-→ AnalyzerResult稳定快照
-→ Display_Task()
-→ cle/addt + FE/FD握手
-→ USART3 PC10/PC11，115200 bit/s
-→ 淘晶驰dashboard
-```
+## 冻结规则
 
-队友新增的三路Goertzel已在真实`VO[2048]`上计算并保留，但本版尚未用它替换对外显示幅值；在实机标定完成前，频谱文本仍沿用队友FFT的结果口径。
-
-## 冻结边界
-
-- 不反向修改任何队友原始快照；
-- 不把ADC/DMA/FFT算法塞入`display.c`；
-- 不恢复“只截第一个周期再拉伸”的旧时域路径；
-- 不改变已稳定的HMI协议、曲线ID上报、FE/FD握手和时域方向补偿；
-- 后续实际信号联调从V2.1.0继续，先验证真实ADC连续帧触发稳定性、Huber
-  实际毛刺A/B、ADC1输入、
-  频率/幅值误差和相位覆盖，再决定是否让Goertzel结果成为正式输出。
+- `firmware/` 是唯一主线；
+- `teammate/` 和 `archive/` 不直接修改；
+- 测量值与显示波形分层，平滑不能替代 Vpp/频谱正确性；
+- 任何目录新增文件时，同步更新该目录的 `README.md` 表格。

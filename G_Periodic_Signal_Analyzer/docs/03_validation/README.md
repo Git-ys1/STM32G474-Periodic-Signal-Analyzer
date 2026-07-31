@@ -1,0 +1,7 @@
+# 验证文档
+
+| 文件 | 说明 |
+|---|---|
+| [`CUSTOM_WAVEFORM_LAB.md`](CUSTOM_WAVEFORM_LAB.md) | PC端自定义波形与相位覆盖实验室 |
+| [`REAL_ADC_FIRST_INTEGRATION_REVIEW_2026-07-31.md`](REAL_ADC_FIRST_INTEGRATION_REVIEW_2026-07-31.md) | 首次真实ADC联调审计 |
+| [`SCREEN_TEST_GUIDE.md`](SCREEN_TEST_GUIDE.md) | 屏幕、协议、KEY1和曲线回归步骤 |

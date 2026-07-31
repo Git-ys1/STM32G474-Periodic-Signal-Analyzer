@@ -29,9 +29,7 @@ import numpy as np
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-FIRMWARE_PROJECT_ROOT = (
-    REPO_ROOT / "projects" / "g474_full_integration_test"
-)
+FIRMWARE_PROJECT_ROOT = REPO_ROOT / "firmware"
 CUSTOM_DATA_ROOT = REPO_ROOT / "tests" / "custom_waveforms"
 CUSTOM_HEADER_PATH = (
     FIRMWARE_PROJECT_ROOT
@@ -106,6 +104,16 @@ class HuberFoldDiagnostics:
     downweighted_sample_count: int
     downweighted_fraction: float
     minimum_sample_weight: float
+
+
+@dataclass(frozen=True)
+class HarmonicProjectionDiagnostics:
+    """Diagnostics for projection onto selected integer harmonic orders."""
+
+    harmonic_orders: Tuple[int, ...]
+    amplitudes_mvpk: Tuple[float, ...]
+    residual_rms_mv: float
+    residual_max_mv: float
 
 
 @dataclass(frozen=True)
@@ -607,6 +615,75 @@ def huber_phase_fold_waveform(
         ),
     )
     return waveform, weights, phases, diagnostics
+
+
+def harmonic_project_waveform(
+    waveform_mv: np.ndarray,
+    harmonic_orders: Sequence[int],
+) -> Tuple[np.ndarray, HarmonicProjectionDiagnostics]:
+    """
+    Project one periodic waveform onto selected integer harmonic orders.
+
+    The G-problem input is constrained to a fundamental plus at most two
+    harmonics.  Projecting the robustly folded cycle onto those detected
+    orders removes off-model bin-to-bin jitter without attenuating the
+    retained component coefficients.  This is a model projection, not a
+    moving average or high-order interpolation.
+    """
+
+    waveform = np.asarray(waveform_mv, dtype=np.float64)
+    if waveform.ndim != 1 or waveform.size < 4:
+        raise ValueError("周期波形必须是一维且至少包含4个点。")
+    if not np.all(np.isfinite(waveform)):
+        raise ValueError("周期波形不能包含NaN或无穷值。")
+
+    maximum_order = (waveform.size - 1) // 2
+    orders = tuple(
+        sorted(
+            {
+                int(order)
+                for order in harmonic_orders
+                if 1 <= int(order) <= maximum_order
+            }
+        )
+    )
+    if not orders:
+        raise ValueError("至少需要一个有效整数谐波次数。")
+
+    centered = waveform - float(np.mean(waveform))
+    phase_cycles = (
+        np.arange(waveform.size, dtype=np.float64) / waveform.size
+    )
+    projected = np.zeros_like(centered)
+    amplitudes: List[float] = []
+
+    for order in orders:
+        angle = 2.0 * math.pi * order * phase_cycles
+        sine = np.sin(angle)
+        cosine = np.cos(angle)
+        sine_coefficient = (
+            2.0 * float(np.dot(centered, sine)) / waveform.size
+        )
+        cosine_coefficient = (
+            2.0 * float(np.dot(centered, cosine)) / waveform.size
+        )
+        projected += (
+            sine_coefficient * sine +
+            cosine_coefficient * cosine
+        )
+        amplitudes.append(
+            math.hypot(sine_coefficient, cosine_coefficient)
+        )
+
+    projected -= float(np.mean(projected))
+    residual = centered - projected
+    diagnostics = HarmonicProjectionDiagnostics(
+        harmonic_orders=orders,
+        amplitudes_mvpk=tuple(amplitudes),
+        residual_rms_mv=float(np.sqrt(np.mean(np.square(residual)))),
+        residual_max_mv=float(np.max(np.abs(residual))),
+    )
+    return projected, diagnostics
 
 
 def periodic_linear_display(

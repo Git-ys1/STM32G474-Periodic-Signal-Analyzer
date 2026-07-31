@@ -22,7 +22,7 @@ from typing import Iterable, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PROJECT_ROOT = REPO_ROOT / "projects" / "g474_full_integration_test"
+PROJECT_ROOT = REPO_ROOT / "firmware"
 HEADER_PATH = PROJECT_ROOT / "Core" / "Inc" / "generated_adc_tests.h"
 OUTPUT_DIR = REPO_ROOT / "tests" / "generated_adc"
 MANIFEST_PATH = OUTPUT_DIR / "manifest.json"
