@@ -33,7 +33,7 @@ void Display_Init(UART_HandleTypeDef *huart);
 /**
  * @brief 显示模块周期任务。
  *
- * 处理dashboard页面、1T/3T、刷新、测试、清除和停止事件；
+ * 处理dashboard页面、1T/3T、普通/Huber折叠、刷新、测试、清除和停止事件；
  * 运行状态下每3秒刷新一次真实结果或随机测试结果。
  * 应在main()的while(1)中持续调用。
  */

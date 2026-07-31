@@ -1,0 +1,235 @@
+{
+  "schema_version": 1,
+  "algorithm": {
+    "name": "two-pass Huber phase fold",
+    "huber_k": 1.345,
+    "minimum_delta_lsb": 1.5,
+    "phase_bin_count": 256,
+    "display_width": 794,
+    "global_smoothing": false,
+    "interpolation": "periodic linear"
+  },
+  "test_matrix": {
+    "test_numbers": [
+      101,
+      102,
+      103,
+      104,
+      105,
+      106,
+      107,
+      108
+    ],
+    "row_count": 72,
+    "clean_row_count": 8,
+    "contaminated_row_count": 64,
+    "fixed_random_seed": 20260731,
+    "contaminations": [
+      {
+        "name": "isolated_4x20mv",
+        "sample_count": 4,
+        "amplitude_mv": 20.0,
+        "is_burst": false
+      },
+      {
+        "name": "isolated_16x40mv",
+        "sample_count": 16,
+        "amplitude_mv": 40.0,
+        "is_burst": false
+      },
+      {
+        "name": "isolated_32x80mv",
+        "sample_count": 32,
+        "amplitude_mv": 80.0,
+        "is_burst": false
+      },
+      {
+        "name": "burst_8x40mv",
+        "sample_count": 8,
+        "amplitude_mv": 40.0,
+        "is_burst": true
+      }
+    ],
+    "frequency_conditions": [
+      "fixed_clean_frequency",
+      "contaminated_refined_frequency"
+    ]
+  },
+  "clean_regression": {
+    "all_display_regression_pass": true,
+    "maximum_display_rmse_increase_mv": 0.0,
+    "maximum_extra_vpp_error_mv": 0.0,
+    "details": [
+      {
+        "test_number": 101,
+        "hard_bin_coverage": 1.0,
+        "ordinary_display_rmse_mv": 0.8499315034977476,
+        "huber_display_rmse_mv": 0.8498879768616291,
+        "display_rmse_increase_mv": -4.3526636118507156e-05,
+        "allowed_display_rmse_increase_mv": 0.1,
+        "display_regression_pass": true,
+        "ordinary_vpp_error_mv": 0.09765624999998579,
+        "huber_vpp_error_mv": 0.09765624999998579,
+        "extra_vpp_error_mv": 0.0,
+        "downweighted_sample_count": 26
+      },
+      {
+        "test_number": 102,
+        "hard_bin_coverage": 1.0,
+        "ordinary_display_rmse_mv": 0.4200439052634832,
+        "huber_display_rmse_mv": 0.4199779799248418,
+        "display_rmse_increase_mv": -6.592533864135941e-05,
+        "allowed_display_rmse_increase_mv": 0.1,
+        "display_regression_pass": true,
+        "ordinary_vpp_error_mv": 0.6875760071681611,
+        "huber_vpp_error_mv": 0.6875760071681611,
+        "extra_vpp_error_mv": 0.0,
+        "downweighted_sample_count": 2
+      },
+      {
+        "test_number": 103,
+        "hard_bin_coverage": 0.03125,
+        "ordinary_display_rmse_mv": 4.870128760525664,
+        "huber_display_rmse_mv": 4.870128760525664,
+        "display_rmse_increase_mv": 0.0,
+        "allowed_display_rmse_increase_mv": 0.48701287605256643,
+        "display_regression_pass": true,
+        "ordinary_vpp_error_mv": 1.5640259356877095,
+        "huber_vpp_error_mv": 1.5640259356877095,
+        "extra_vpp_error_mv": 0.0,
+        "downweighted_sample_count": 0
+      },
+      {
+        "test_number": 104,
+        "hard_bin_coverage": 0.125,
+        "ordinary_display_rmse_mv": 0.814507606636617,
+        "huber_display_rmse_mv": 0.814507606636617,
+        "display_rmse_increase_mv": 0.0,
+        "allowed_display_rmse_increase_mv": 0.1,
+        "display_regression_pass": true,
+        "ordinary_vpp_error_mv": 1.5640259356877664,
+        "huber_vpp_error_mv": 1.5640259356877664,
+        "extra_vpp_error_mv": 0.0,
+        "downweighted_sample_count": 0
+      },
+      {
+        "test_number": 105,
+        "hard_bin_coverage": 0.5,
+        "ordinary_display_rmse_mv": 0.6614118449188627,
+        "huber_display_rmse_mv": 0.6614118449188627,
+        "display_rmse_increase_mv": 0.0,
+        "allowed_display_rmse_increase_mv": 0.1,
+        "display_regression_pass": true,
+        "ordinary_vpp_error_mv": 0.37930856131848145,
+        "huber_vpp_error_mv": 0.37930856131848145,
+        "extra_vpp_error_mv": 0.0,
+        "downweighted_sample_count": 0
+      },
+      {
+        "test_number": 106,
+        "hard_bin_coverage": 1.0,
+        "ordinary_display_rmse_mv": 0.09865839722983087,
+        "huber_display_rmse_mv": 0.09865839722983087,
+        "display_rmse_increase_mv": 0.0,
+        "allowed_display_rmse_increase_mv": 0.1,
+        "display_regression_pass": true,
+        "ordinary_vpp_error_mv": 0.37930856131849566,
+        "huber_vpp_error_mv": 0.37930856131849566,
+        "extra_vpp_error_mv": 0.0,
+        "downweighted_sample_count": 0
+      },
+      {
+        "test_number": 107,
+        "hard_bin_coverage": 0.66796875,
+        "ordinary_display_rmse_mv": 0.420310869628445,
+        "huber_display_rmse_mv": 0.420310869628445,
+        "display_rmse_increase_mv": 0.0,
+        "allowed_display_rmse_increase_mv": 0.1,
+        "display_regression_pass": true,
+        "ordinary_vpp_error_mv": 0.3793085434153767,
+        "huber_vpp_error_mv": 0.3793085434153767,
+        "extra_vpp_error_mv": 0.0,
+        "downweighted_sample_count": 0
+      },
+      {
+        "test_number": 108,
+        "hard_bin_coverage": 0.015625,
+        "ordinary_display_rmse_mv": 8.190640232288724,
+        "huber_display_rmse_mv": 8.190640232288724,
+        "display_rmse_increase_mv": 0.0,
+        "allowed_display_rmse_increase_mv": 0.8190640232288724,
+        "display_regression_pass": true,
+        "ordinary_vpp_error_mv": 8.486328124750358,
+        "huber_vpp_error_mv": 8.486328124750358,
+        "extra_vpp_error_mv": 0.0,
+        "downweighted_sample_count": 0
+      }
+    ]
+  },
+  "isolated_outliers_medium_or_high_coverage": {
+    "coverage_threshold": 0.5,
+    "fixed_clean_frequency_case_count": 15,
+    "fixed_clean_frequency_median_display_rmse_improvement_percent": 55.61305124532234,
+    "contaminated_refined_frequency_case_count": 15,
+    "contaminated_refined_frequency_median_display_rmse_improvement_percent": 54.437901438819715,
+    "fixed_clean_frequency_median_max_error_improvement_percent": 73.57933409353878,
+    "contaminated_refined_frequency_median_max_error_improvement_percent": 72.59027675328676
+  },
+  "burst_outliers": {
+    "fixed_clean_frequency_median_display_rmse_improvement_percent": 27.105782497200188,
+    "contaminated_refined_frequency_median_display_rmse_improvement_percent": 27.463550210385208,
+    "known_boundary": "A contiguous burst can influence adjacent phases and the first-pass predictor together; Huber is not a replacement for acquisition-quality checks."
+  },
+  "best_contaminated_case": {
+    "test_number": 106,
+    "test_name": "boundary_250k_1_2",
+    "contamination_type": "isolated_32x80mv",
+    "frequency_condition": "contaminated_refined_frequency",
+    "hard_bin_coverage": 1.0,
+    "frequency_shift_hz": -0.23405852567520924,
+    "ordinary_display_rmse_mv": 2.7249297120360865,
+    "huber_display_rmse_mv": 0.32624228058507543,
+    "display_rmse_improvement_percent": 88.02749740134381,
+    "ordinary_display_max_error_mv": 16.3783245278498,
+    "huber_display_max_error_mv": 2.9443429984344505,
+    "downweighted_sample_count": 417
+  },
+  "worst_contaminated_case": {
+    "test_number": 108,
+    "test_name": "exact_256k_pure",
+    "contamination_type": "isolated_32x80mv",
+    "frequency_condition": "contaminated_refined_frequency",
+    "hard_bin_coverage": 0.03125,
+    "frequency_shift_hz": 2.0943046475586016,
+    "ordinary_display_rmse_mv": 7.724524239383342,
+    "huber_display_rmse_mv": 8.170187642840196,
+    "display_rmse_improvement_percent": -5.769460870931661,
+    "ordinary_display_max_error_mv": 14.460162964435682,
+    "huber_display_max_error_mv": 15.021287803102105,
+    "downweighted_sample_count": 535
+  },
+  "largest_frequency_shift_case": {
+    "test_number": 108,
+    "test_name": "exact_256k_pure",
+    "contamination_type": "isolated_32x80mv",
+    "frequency_condition": "fixed_clean_frequency",
+    "hard_bin_coverage": 0.015625,
+    "frequency_shift_hz": 2.0943046475586016,
+    "ordinary_display_rmse_mv": 7.850805728289928,
+    "huber_display_rmse_mv": 8.184550202042105,
+    "display_rmse_improvement_percent": -4.251085624874759,
+    "ordinary_display_max_error_mv": 14.062737171265695,
+    "huber_display_max_error_mv": 14.56164509502532,
+    "downweighted_sample_count": 535
+  },
+  "recommendation": {
+    "artificial_data_supports_guarded_board_trial": true,
+    "conclusion": "PC artificial-outlier validation supports a guarded STM32 trial, but real adc_b[2048] frames are still required.",
+    "real_adc_validation_pending": true,
+    "estimated_stm32_cost": {
+      "extra_ram_bytes": "about 8 KiB for one 2048-float residual workspace; about 10 KiB if 256-bin sums/weights cannot reuse existing buffers",
+      "extra_flash_bytes": "roughly 1-3 KiB before measurement",
+      "extra_compute": "one first-pass prediction/residual pass, two median selections, and one additional weighted fold; roughly 2x the current folding work plus robust statistics"
+    }
+  }
+}

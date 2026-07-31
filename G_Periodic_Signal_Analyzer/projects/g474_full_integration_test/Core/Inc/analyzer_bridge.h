@@ -34,6 +34,19 @@ typedef enum
     ANALYZER_SOURCE_TEST
 } AnalyzerSource;
 
+/**
+ * @brief 时域波形相位折叠算法。
+ *
+ * 普通模式保持V2.0.0现有行为；Huber模式仅改变显示波形重建，
+ * 不修改队友测得的Vpp、RMS、频率和频谱分量。
+ */
+typedef enum
+{
+    ANALYZER_WAVEFORM_FOLD_ORDINARY = 0,
+    ANALYZER_WAVEFORM_FOLD_HUBER,
+    ANALYZER_WAVEFORM_FOLD_MODE_COUNT
+} AnalyzerWaveformFoldMode;
+
 typedef struct
 {
     float frequency_hz;
@@ -54,6 +67,7 @@ typedef struct
     AnalyzerComponent components[ANALYZER_MAX_COMPONENTS];
 
     uint16_t waveform_count;
+    AnalyzerWaveformFoldMode waveform_fold_mode;
     float waveform_mv[ANALYZER_DISPLAY_POINT_COUNT];
 
     /*
@@ -124,6 +138,19 @@ void AnalyzerBridge_UseRealResult(void);
  * @brief 查询当前显示是否被测试结果覆盖。
  */
 bool AnalyzerBridge_IsTestOverrideActive(void);
+
+/**
+ * @brief 切换时域波形折叠算法，并用当前同一帧ADC数据立即重建。
+ *
+ * @return true表示模式有效且当前快照（若存在）已完成重建。
+ */
+bool AnalyzerBridge_SetWaveformFoldMode(
+    AnalyzerWaveformFoldMode mode);
+
+/**
+ * @brief 获取当前时域波形折叠算法。
+ */
+AnalyzerWaveformFoldMode AnalyzerBridge_GetWaveformFoldMode(void);
 
 #ifdef __cplusplus
 }

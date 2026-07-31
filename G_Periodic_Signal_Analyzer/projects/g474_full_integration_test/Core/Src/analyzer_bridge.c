@@ -11,6 +11,10 @@
 #define ANALYZER_FREQ_SEARCH_HALF_HZ        500.0f
 #define ANALYZER_FREQ_SEARCH_STEP_HZ        10.0f
 #define ANALYZER_FREQ_SEARCH_COUNT          101U
+#define ANALYZER_MAX_SAMPLE_COUNT           2048U
+#define ANALYZER_HUBER_K                    1.345f
+#define ANALYZER_HUBER_SCALE_FACTOR         1.4826f
+#define ANALYZER_HUBER_MINIMUM_DELTA_LSB    1.5f
 
 #if ANALYZER_TEST_ENABLE
 #include "generated_adc_tests.h"
@@ -43,6 +47,8 @@ static uint32_t s_next_sequence = 1U;
 static uint32_t s_random_state = 0x6D2B79F5UL;
 static uint8_t s_last_test_case = 0xFFU;
 static bool s_test_override = false;
+static AnalyzerWaveformFoldMode s_waveform_fold_mode =
+    ANALYZER_WAVEFORM_FOLD_ORDINARY;
 /*
  * 完整2048点ADC缓冲区按基频相位折叠到256个显示相位槽。
  * 两个工作数组必须是静态存储，避免占用仅1 KB的主栈。
@@ -50,6 +56,110 @@ static bool s_test_override = false;
 static float s_phase_sum_mv[ANALYZER_DISPLAY_POINT_COUNT];
 static float s_phase_weight[ANALYZER_DISPLAY_POINT_COUNT];
 static float s_frequency_scores[ANALYZER_FREQ_SEARCH_COUNT];
+/*
+ * Huber需要保存2048个第一遍残差以计算中位数和MAD。
+ * 最近一帧真实ADC也保留在静态区，保证状态开关切换后可用同一帧
+ * 立即重建，而不是等待下一帧或拿不同测试组做视觉比较。
+ */
+static float s_huber_workspace[ANALYZER_MAX_SAMPLE_COUNT];
+static uint16_t s_latest_real_adc[ANALYZER_MAX_SAMPLE_COUNT];
+static uint16_t s_latest_real_sample_count = 0U;
+static float s_latest_real_volts_per_code = 0.0f;
+static float s_latest_real_sample_rate_hz = 0.0f;
+static bool s_latest_real_input_valid = false;
+
+/**
+ * @brief 原地选择第k小浮点数，避免qsort递归和额外2048点副本。
+ */
+static float AnalyzerBridge_SelectKth(float *values,
+                                      uint16_t count,
+                                      uint16_t k)
+{
+    int32_t left = 0;
+    int32_t right = (int32_t)count - 1;
+    int32_t target = (int32_t)k;
+
+    while (left < right)
+    {
+        int32_t i = left;
+        int32_t j = right;
+        float pivot =
+            values[left + (right - left) / 2];
+
+        while (i <= j)
+        {
+            while ((i <= right) && (values[i] < pivot))
+            {
+                ++i;
+            }
+
+            while ((j >= left) && (values[j] > pivot))
+            {
+                --j;
+            }
+
+            if (i <= j)
+            {
+                float temporary = values[i];
+                values[i] = values[j];
+                values[j] = temporary;
+                ++i;
+                --j;
+            }
+        }
+
+        if (target <= j)
+        {
+            right = j;
+        }
+        else if (target >= i)
+        {
+            left = i;
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    return values[k];
+}
+
+/**
+ * @brief 计算浮点数组中位数；允许原地重排工作数组。
+ */
+static float AnalyzerBridge_Median(float *values,
+                                   uint16_t count)
+{
+    uint16_t upper_index;
+    float upper;
+
+    if ((values == NULL) || (count == 0U))
+    {
+        return 0.0f;
+    }
+
+    upper_index = (uint16_t)(count / 2U);
+    upper = AnalyzerBridge_SelectKth(
+        values,
+        count,
+        upper_index
+    );
+
+    if ((count & 1U) != 0U)
+    {
+        return upper;
+    }
+
+    return
+        0.5f *
+        (upper +
+         AnalyzerBridge_SelectKth(
+             values,
+             count,
+             (uint16_t)(upper_index - 1U)
+         ));
+}
 
 static void AnalyzerBridge_SortComponents(AnalyzerComponent *components,
                                            uint8_t count)
@@ -251,6 +361,283 @@ static float AnalyzerBridge_RefineFundamentalForWaveform(
         ANALYZER_FREQ_SEARCH_HALF_HZ +
         ((float)best_index + fractional_offset) *
         ANALYZER_FREQ_SEARCH_STEP_HZ;
+}
+
+/**
+ * @brief 在普通折叠结果上计算Huber权重并对原ADC样本执行第二遍折叠。
+ *
+ * 第一遍波形只用于预测每个样本的相位期望值；第二遍仍折叠原始中心化
+ * ADC样本。阈值为max(1.345×1.4826×MAD, 1.5×ADC_LSB)，
+ * 不增加全局平滑或高阶插值。
+ */
+static bool AnalyzerBridge_ApplyHuberSecondPass(
+    AnalyzerResult *result,
+    const uint16_t *adc_codes,
+    uint16_t sample_count,
+    float mean_code,
+    float volts_per_code,
+    float sample_rate_hz,
+    float fold_frequency_hz)
+{
+    float phase_step;
+    float phase_cycles = 0.0f;
+    float residual_center;
+    float robust_scale_mv;
+    float delta_mv;
+    float mean_mv = 0.0f;
+    uint16_t i;
+
+    if ((result == NULL) ||
+        (adc_codes == NULL) ||
+        (sample_count < 2U) ||
+        (sample_count > ANALYZER_MAX_SAMPLE_COUNT) ||
+        (volts_per_code <= 0.0f) ||
+        (sample_rate_hz <= 0.0f) ||
+        (fold_frequency_hz <= 0.0f))
+    {
+        return false;
+    }
+
+    phase_step = fold_frequency_hz / sample_rate_hz;
+
+    /*
+     * 第一遍残差。result->waveform_mv此时仍是普通折叠并去均值后的
+     * 256点周期波形，预测值继续使用与显示一致的周期线性插值。
+     */
+    for (i = 0U; i < sample_count; ++i)
+    {
+        float phase_position =
+            phase_cycles * (float)ANALYZER_DISPLAY_POINT_COUNT;
+        uint16_t index0 = (uint16_t)phase_position;
+        uint16_t index1;
+        float fraction;
+        float predicted_mv;
+        float sample_mv;
+
+        if (index0 >= ANALYZER_DISPLAY_POINT_COUNT)
+        {
+            index0 = 0U;
+        }
+
+        fraction = phase_position - (float)index0;
+        index1 =
+            (uint16_t)(
+                (index0 + 1U) %
+                ANALYZER_DISPLAY_POINT_COUNT
+            );
+        predicted_mv =
+            result->waveform_mv[index0] +
+            fraction *
+            (result->waveform_mv[index1] -
+             result->waveform_mv[index0]);
+        sample_mv =
+            ((float)adc_codes[i] - mean_code) *
+            volts_per_code *
+            1000.0f;
+        s_huber_workspace[i] = sample_mv - predicted_mv;
+
+        phase_cycles += phase_step;
+        while (phase_cycles >= 1.0f)
+        {
+            phase_cycles -= 1.0f;
+        }
+    }
+
+    residual_center = AnalyzerBridge_Median(
+        s_huber_workspace,
+        sample_count
+    );
+
+    for (i = 0U; i < sample_count; ++i)
+    {
+        s_huber_workspace[i] =
+            fabsf(s_huber_workspace[i] - residual_center);
+    }
+
+    robust_scale_mv =
+        ANALYZER_HUBER_SCALE_FACTOR *
+        AnalyzerBridge_Median(
+            s_huber_workspace,
+            sample_count
+        );
+    delta_mv =
+        ANALYZER_HUBER_K * robust_scale_mv;
+    if (delta_mv <
+        ANALYZER_HUBER_MINIMUM_DELTA_LSB *
+        volts_per_code *
+        1000.0f)
+    {
+        delta_mv =
+            ANALYZER_HUBER_MINIMUM_DELTA_LSB *
+            volts_per_code *
+            1000.0f;
+    }
+
+    /*
+     * 第二遍重新计算每个样本残差和Huber权重。工作数组已经被中位数
+     * 选择原地重排，因此这里不依赖其样本顺序。
+     */
+    memset(s_phase_sum_mv, 0, sizeof(s_phase_sum_mv));
+    memset(s_phase_weight, 0, sizeof(s_phase_weight));
+    phase_cycles = 0.0f;
+
+    for (i = 0U; i < sample_count; ++i)
+    {
+        float phase_position =
+            phase_cycles * (float)ANALYZER_DISPLAY_POINT_COUNT;
+        uint16_t index0 = (uint16_t)phase_position;
+        uint16_t index1;
+        float fraction;
+        float predicted_mv;
+        float sample_mv;
+        float centered_residual;
+        float sample_weight = 1.0f;
+        float weight0;
+        float weight1;
+
+        if (index0 >= ANALYZER_DISPLAY_POINT_COUNT)
+        {
+            index0 = 0U;
+        }
+
+        fraction = phase_position - (float)index0;
+        index1 =
+            (uint16_t)(
+                (index0 + 1U) %
+                ANALYZER_DISPLAY_POINT_COUNT
+            );
+        predicted_mv =
+            result->waveform_mv[index0] +
+            fraction *
+            (result->waveform_mv[index1] -
+             result->waveform_mv[index0]);
+        sample_mv =
+            ((float)adc_codes[i] - mean_code) *
+            volts_per_code *
+            1000.0f;
+        centered_residual =
+            fabsf(
+                sample_mv -
+                predicted_mv -
+                residual_center
+            );
+
+        if (centered_residual > delta_mv)
+        {
+            sample_weight = delta_mv / centered_residual;
+        }
+
+        weight0 = (1.0f - fraction) * sample_weight;
+        weight1 = fraction * sample_weight;
+        s_phase_sum_mv[index0] += sample_mv * weight0;
+        s_phase_weight[index0] += weight0;
+
+        if (fraction > ANALYZER_PHASE_WEIGHT_EPSILON)
+        {
+            s_phase_sum_mv[index1] += sample_mv * weight1;
+            s_phase_weight[index1] += weight1;
+        }
+
+        phase_cycles += phase_step;
+        while (phase_cycles >= 1.0f)
+        {
+            phase_cycles -= 1.0f;
+        }
+    }
+
+    /*
+     * 与普通折叠完全相同：有覆盖槽取加权平均，空槽做环形线性
+     * 补齐，最后再次去除256点均值。
+     */
+    for (i = 0U; i < ANALYZER_DISPLAY_POINT_COUNT; ++i)
+    {
+        if (s_phase_weight[i] > ANALYZER_PHASE_WEIGHT_EPSILON)
+        {
+            result->waveform_mv[i] =
+                s_phase_sum_mv[i] / s_phase_weight[i];
+        }
+        else
+        {
+            result->waveform_mv[i] = 0.0f;
+        }
+    }
+
+    for (i = 0U; i < ANALYZER_DISPLAY_POINT_COUNT; ++i)
+    {
+        uint16_t left_distance;
+        uint16_t right_distance;
+        uint16_t left_index;
+        uint16_t right_index;
+        float ratio;
+
+        if (s_phase_weight[i] > ANALYZER_PHASE_WEIGHT_EPSILON)
+        {
+            continue;
+        }
+
+        for (left_distance = 1U;
+             left_distance <= ANALYZER_DISPLAY_POINT_COUNT;
+             ++left_distance)
+        {
+            left_index =
+                (uint16_t)(
+                    (i +
+                     ANALYZER_DISPLAY_POINT_COUNT -
+                     left_distance) %
+                    ANALYZER_DISPLAY_POINT_COUNT
+                );
+            if (s_phase_weight[left_index] >
+                ANALYZER_PHASE_WEIGHT_EPSILON)
+            {
+                break;
+            }
+        }
+
+        for (right_distance = 1U;
+             right_distance <= ANALYZER_DISPLAY_POINT_COUNT;
+             ++right_distance)
+        {
+            right_index =
+                (uint16_t)(
+                    (i + right_distance) %
+                    ANALYZER_DISPLAY_POINT_COUNT
+                );
+            if (s_phase_weight[right_index] >
+                ANALYZER_PHASE_WEIGHT_EPSILON)
+            {
+                break;
+            }
+        }
+
+        if ((left_distance > ANALYZER_DISPLAY_POINT_COUNT) ||
+            (right_distance > ANALYZER_DISPLAY_POINT_COUNT))
+        {
+            return false;
+        }
+
+        ratio =
+            (float)left_distance /
+            (float)(left_distance + right_distance);
+        result->waveform_mv[i] =
+            result->waveform_mv[left_index] +
+            ratio *
+            (result->waveform_mv[right_index] -
+             result->waveform_mv[left_index]);
+    }
+
+    for (i = 0U; i < ANALYZER_DISPLAY_POINT_COUNT; ++i)
+    {
+        mean_mv += result->waveform_mv[i];
+    }
+    mean_mv /= (float)ANALYZER_DISPLAY_POINT_COUNT;
+
+    for (i = 0U; i < ANALYZER_DISPLAY_POINT_COUNT; ++i)
+    {
+        result->waveform_mv[i] -= mean_mv;
+    }
+
+    result->waveform_count = ANALYZER_DISPLAY_POINT_COUNT;
+    return true;
 }
 
 static bool AnalyzerBridge_BuildRealWaveform(
@@ -455,6 +842,22 @@ static bool AnalyzerBridge_BuildRealWaveform(
     }
 
     result->waveform_count = ANALYZER_DISPLAY_POINT_COUNT;
+
+    if ((s_waveform_fold_mode ==
+         ANALYZER_WAVEFORM_FOLD_HUBER) &&
+        !AnalyzerBridge_ApplyHuberSecondPass(
+            result,
+            adc_codes,
+            sample_count,
+            mean_code,
+            volts_per_code,
+            sample_rate_hz,
+            fold_frequency_hz))
+    {
+        return false;
+    }
+
+    result->waveform_fold_mode = s_waveform_fold_mode;
     return true;
 }
 
@@ -539,6 +942,12 @@ void AnalyzerBridge_Init(void)
         SysTick->VAL;
     s_last_test_case = 0xFFU;
     s_test_override = false;
+    s_waveform_fold_mode = ANALYZER_WAVEFORM_FOLD_ORDINARY;
+    memset(s_latest_real_adc, 0, sizeof(s_latest_real_adc));
+    s_latest_real_sample_count = 0U;
+    s_latest_real_volts_per_code = 0.0f;
+    s_latest_real_sample_rate_hz = 0.0f;
+    s_latest_real_input_valid = false;
 }
 
 void AnalyzerBridge_PublishReal(
@@ -557,7 +966,8 @@ void AnalyzerBridge_PublishReal(
 
     if ((adc_codes == NULL) ||
         (frequencies_hz == NULL) ||
-        (amplitudes_v == NULL))
+        (amplitudes_v == NULL) ||
+        (sample_count > ANALYZER_MAX_SAMPLE_COUNT))
     {
         return;
     }
@@ -623,6 +1033,15 @@ void AnalyzerBridge_PublishReal(
 
     s_publish_result.sequence = s_next_sequence++;
     s_publish_result.valid = 1U;
+    memcpy(
+        s_latest_real_adc,
+        adc_codes,
+        (size_t)sample_count * sizeof(adc_codes[0])
+    );
+    s_latest_real_sample_count = sample_count;
+    s_latest_real_volts_per_code = volts_per_code;
+    s_latest_real_sample_rate_hz = sample_rate_hz;
+    s_latest_real_input_valid = true;
     s_real_result = s_publish_result;
 }
 
@@ -687,6 +1106,25 @@ void AnalyzerBridge_RunRandomTest(void)
 
 void AnalyzerBridge_UseRealResult(void)
 {
+    if ((s_real_result.valid != 0U) &&
+        (s_real_result.waveform_fold_mode !=
+         s_waveform_fold_mode) &&
+        s_latest_real_input_valid)
+    {
+        s_publish_result = s_real_result;
+        if (AnalyzerBridge_BuildRealWaveform(
+                &s_publish_result,
+                s_latest_real_adc,
+                s_latest_real_sample_count,
+                s_latest_real_volts_per_code,
+                s_latest_real_sample_rate_hz))
+        {
+            s_publish_result.sequence = s_next_sequence++;
+            s_publish_result.valid = 1U;
+            s_real_result = s_publish_result;
+        }
+    }
+
     s_test_override = false;
 }
 
@@ -697,4 +1135,78 @@ bool AnalyzerBridge_IsTestOverrideActive(void)
 #else
     return false;
 #endif
+}
+
+bool AnalyzerBridge_SetWaveformFoldMode(
+    AnalyzerWaveformFoldMode mode)
+{
+    AnalyzerWaveformFoldMode previous_mode;
+
+    if (mode >= ANALYZER_WAVEFORM_FOLD_MODE_COUNT)
+    {
+        return false;
+    }
+
+    if (mode == s_waveform_fold_mode)
+    {
+        return true;
+    }
+
+    previous_mode = s_waveform_fold_mode;
+    s_waveform_fold_mode = mode;
+
+    /*
+     * 只重建当前显示源，确保切换前后比较同一帧。非活动源会在下一次
+     * 正常发布或进入测试时自动使用新模式，避免一次开关动作重复执行
+     * 两次完整Huber计算。
+     */
+    if (s_test_override)
+    {
+#if ANALYZER_TEST_ENABLE
+        if ((s_test_result.valid != 0U) &&
+            (s_last_test_case < ANALYZER_TEST_CASE_COUNT))
+        {
+            if (!AnalyzerBridge_BuildTestResult(
+                    &ANALYZER_TEST_CASES[s_last_test_case],
+                    &s_publish_result))
+            {
+                s_waveform_fold_mode = previous_mode;
+                return false;
+            }
+
+            s_test_result = s_publish_result;
+        }
+#endif
+    }
+    else if (s_real_result.valid != 0U)
+    {
+        if (!s_latest_real_input_valid)
+        {
+            s_waveform_fold_mode = previous_mode;
+            return false;
+        }
+
+        s_publish_result = s_real_result;
+        if (!AnalyzerBridge_BuildRealWaveform(
+                &s_publish_result,
+                s_latest_real_adc,
+                s_latest_real_sample_count,
+                s_latest_real_volts_per_code,
+                s_latest_real_sample_rate_hz))
+        {
+            s_waveform_fold_mode = previous_mode;
+            return false;
+        }
+
+        s_publish_result.sequence = s_next_sequence++;
+        s_publish_result.valid = 1U;
+        s_real_result = s_publish_result;
+    }
+
+    return true;
+}
+
+AnalyzerWaveformFoldMode AnalyzerBridge_GetWaveformFoldMode(void)
+{
+    return s_waveform_fold_mode;
 }

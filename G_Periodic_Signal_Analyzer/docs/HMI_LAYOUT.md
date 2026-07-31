@@ -1,7 +1,7 @@
 # HMI布局基线
 
 更新时间：2026-07-31
-适用版本：V2.0触发相位锚 dashboard单页面
+适用版本：V2.0基线 + V2.1普通/Huber折叠切换
 
 配套源工程：
 `projects/tjc_display_demo/HMI/TJC8048X270_dashboard_v1.3.1.HMI`，
@@ -26,6 +26,8 @@
 | `b5` | 停止绘画并冻结画面 | type 98，id 16，文本`停止` |
 | `t_trigger` | 下拉框标题 | 文本`触发方式` |
 | `cb0` | 选择时域触发方式 | 下拉框，默认`val=1` |
+| `t_fold` | 状态开关标题 | 文本`折叠方式` |
+| `sw_huber` | 普通/Huber折叠切换 | 状态开关，默认`val=0` |
 | `t_vpp` | 峰峰值 | type 116，id 2 |
 | `t_rms` | 真有效值 | type 116，id 3 |
 | `t_freq` | 基频 | type 116，id 4 |
@@ -62,10 +64,13 @@ printh 5A
 printh A5 02 07
 prints cb0.val,1
 printh 5A
+printh A5 02 08
+prints sw_huber.val,1
+printh 5A
 ```
 
-第一帧上报两条曲线ID，第二帧同步当前触发方式。两帧必须保持完整顺序，
-不要把`mode`塞进原6字节曲线ID帧。
+第一帧上报两条曲线ID，第二帧同步当前触发方式，第三帧同步普通/Huber折叠
+方式。三帧必须保持完整顺序，不要把参数塞进原6字节曲线ID帧。
 
 按钮弹起事件：
 
@@ -131,3 +136,50 @@ if(cb0.down==0)
 
 - [下拉框控件](http://wiki2.tjc1688.com/widgets/ComboBox.html)
 - [prints发送变量或常量](http://wiki2.tjc1688.com/commands/prints.html)
+
+## V2.1普通/Huber状态开关
+
+在`dashboard`新增淘晶驰“状态开关”控件。X2系列原生支持该控件，建议属性：
+
+```text
+objname = sw_huber
+vscope  = 全局
+val     = 0
+txt     = 普通/Huber
+dez     = 0
+```
+
+旁边可增加文本控件：
+
+```text
+objname = t_fold
+txt     = 折叠方式
+```
+
+官方说明要求状态开关的`txt`要么为空，要么用斜杠分隔两种状态文字。因此不能
+写成`普通 Huber`，应使用`普通/Huber`。`val=0`是当前V2.0普通折叠，
+`val=1`是两遍Huber折叠；默认必须保持0。
+
+在`sw_huber`的弹起事件中写：
+
+```text
+printh A5 02 08
+prints sw_huber.val,1
+printh 5A
+```
+
+分别产生：
+
+```text
+普通:  A5 02 08 00 5A
+Huber: A5 02 08 01 5A
+```
+
+`vscope`设为全局，使MCU执行`page dashboard`后保留用户选择；页面后初始化
+必须再发送一次当前`sw_huber.val`。运行中切换会用当前最新一帧ADC或当前测试组
+立即重建并只重画时域曲线，不改变频谱、`Upp`、`Urms`和频率文本。状态开关
+不勾选“发送键值”。
+
+官方参考：
+
+- [状态开关控件](http://wiki2.tjc1688.com/widgets/Switch.html)

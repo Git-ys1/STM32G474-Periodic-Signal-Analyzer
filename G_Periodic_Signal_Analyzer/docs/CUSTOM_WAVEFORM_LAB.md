@@ -387,6 +387,64 @@ s_curve_buffer[(DISPLAY_CURVE_WIDTH - 1U) - i] = mapped_value;
 当前烧录固件启用了`ANALYZER_CUSTOM_TEST_ENABLE=1`，含T101～T108。正式比赛前
 若需恢复原T1～T9，再将该开关设为0并重新构建烧录。
 
+## 15. 两遍Huber鲁棒相位折叠离线验证
+
+为区分“显示毛刺来自孤立ADC异常点”和“低相位覆盖本身无法重建”，新增独立
+PC脚本：
+
+```powershell
+python tools\analyze_huber_phase_fold.py
+```
+
+输出位于：
+
+```text
+tests\huber_phase_fold\comparison.csv
+tests\huber_phase_fold\summary.json
+tests\huber_phase_fold\comparison_gallery.png
+```
+
+算法第一遍仍调用现有普通相位折叠，由初始周期波形在每个样本相位处做周期线性
+插值，得到残差。残差尺度使用`1.4826 × MAD`估计，Huber阈值为：
+
+```text
+delta = max(1.345 × robust_sigma, 1.5 × ADC_LSB)
+```
+
+第二遍把Huber样本权重乘入原有左右相位槽权重，但仍折叠原始中心化ADC样本；
+没有增加全局平滑、三次样条或其他高阶插值。以3.3 V、12位ADC计算，阈值下限
+约为1.2085 mV。
+
+测试对T101～T108注入固定种子的4点±20 mV、16点±40 mV、32点±80 mV孤立
+异常，以及连续8点±40 mV突发异常。每组污染数据分别使用干净数据细化频率和
+污染后重新细化频率，共得到72行可复现结果。
+
+| 指标 | 结果 |
+|---|---:|
+| 8组干净数据显示回归 | 全部通过 |
+| 干净数据最大显示RMSE增量 | 0.000 mV |
+| 干净数据最大额外Vpp误差 | 0.000 mV |
+| 中高覆盖孤立异常，固定干净频率的显示RMSE中位改善 | 55.61% |
+| 中高覆盖孤立异常，污染后重估频率的显示RMSE中位改善 | 54.44% |
+| 两种频率条件下的最大误差中位改善 | 73.58% / 72.59% |
+| 连续突发异常的显示RMSE中位改善 | 27.11% / 27.46% |
+
+最有效案例是T106的32点±80 mV污染并重新细化频率：显示RMSE由2.725 mV
+降至0.326 mV，最大误差由16.378 mV降至2.944 mV。最差案例是T108精确
+256 kHz低覆盖条件，污染后硬槽覆盖仅3.125%，Huber反而使显示RMSE由
+7.725 mV增至8.170 mV。连续突发异常的最差案例T103也由4.836 mV轻微增至
+4.869 mV。
+
+因此，Huber可以抑制中高相位覆盖下的孤立毛刺，但不能创造缺失相位，也不能
+代替频率可信度、最大相位空洞和采集质量检查。PC GUI默认算法保持普通折叠；
+STM32融合工程现已加入`A5 02 08 enabled 5A`状态开关协议，默认`enabled=0`
+继续使用普通折叠，`enabled=1`才执行同参数的两遍Huber。两种模式都不修改
+测得的`Upp/Urms/频率/谱线`。该上板入口用于取得真实`adc_b[2048]`对照证据，
+不代表Huber已经成为正式默认算法。
+
+STM32实现、资源变化和HMI配置见
+[V2.1普通/Huber相位折叠状态开关](V2.1_HUBER_FOLD_SWITCH_2026-07-31.md)。
+
 ## 参考
 
 - [Tektronix：Equivalent-time Sampling Mode](https://www.tek.com/en/support/faqs/what-equivalent-time-sampling-mode)

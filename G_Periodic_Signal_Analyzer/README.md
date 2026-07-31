@@ -9,7 +9,7 @@
 
 ## 当前版本
 
-当前融合版本为 **V2.0.0时域触发与相位锚定版（2026-07-31）**。
+当前融合版本为 **V2.1.0普通/Huber鲁棒折叠切换版（2026-07-31）**。
 
 本版以V1.9.0队友ADC1融合底座为基础，继续遵循“队友工程作为底座、我们的
 显示功能作为叠加层”：
@@ -19,6 +19,10 @@
 - KEY1短按复用原1T/3T命令，长按复用原“刷新”命令，恢复真实ADC自动显示；
 - 时域新增无触发、上升过零、下降过零和正峰值四种相位锚，默认上升过零；
 - 淘晶驰下拉框使用`A5 02 07 mode 5A`五字节帧直接发送最终触发模式；
+- PC端完成两遍Huber折叠的72组干净/污染对照，中高覆盖孤立毛刺显示RMSE
+  中位改善约55%，同时保留低覆盖与连续异常的失败边界；
+- STM32加入默认关闭的普通/Huber状态开关协议`A5 02 08 enabled 5A`，只改变
+  时域波形重建，不修改Upp、Urms、频率和频谱；
 - 保留第一次FFT谱峰快照，避免`Vpp_R()`二次FFT覆盖对外结果；
 - 保留`__ARM_use_no_argv`、静态大对象、UART中断接收、动态曲线ID和FE/FD握手等已验证修复；
 - Keil ArmClang 6.7 Clean Build通过：0 errors、0 warnings；
@@ -29,6 +33,7 @@
 
 - [V1.9队友ADC1底座融合发布说明](docs/V1.9_ADC1_TEAMMATE_BASE_INTEGRATION.md)
 - [V2.0时域触发与相位锚发布说明](docs/V2_TRIGGER_PHASE_ANCHOR_2026-07-31.md)
+- [V2.1普通/Huber折叠状态开关发布说明](docs/V2.1_HUBER_FOLD_SWITCH_2026-07-31.md)
 - [当前开发状态](docs/CURRENT_STATUS.md)
 - [队友工程双向融合速查](docs/TEAMMATE_INTEGRATION_QUICK_GUIDE.md)
 - [队友输出映射](docs/TEAMMATE_OUTPUT_MAP.md)
@@ -45,7 +50,7 @@ projects/
 ├─ teammate_adc_reference/        队友早期参考快照
 ├─ teammate_adc_newest/           队友上一版原始快照
 ├─ teammate_adc_reallynewest!/    本次ADC1/Goertzel原始快照
-└─ g474_full_integration_test/    当前V2.0.0全量融合与烧录工程
+└─ g474_full_integration_test/    当前V2.1.0全量融合与烧录工程
 ```
 
 队友原始快照独立归档，不在原目录内做显示融合。正式运行与后续联调以`g474_full_integration_test`为唯一融合工程。
@@ -61,7 +66,7 @@ TIM3 TRGO
 → 队友Vpp_Robust()与Vpp_R()
 → AnalyzerBridge_PublishReal(adc_b, ...)
 → 相关搜索细化折叠频率
-→ 2048个真实ADC点折叠到256个相位槽
+→ 2048个真实ADC点普通折叠，或可选Huber第二遍折叠到256个相位槽
 → AnalyzerResult稳定快照
 → Display_Task()
 → cle/addt + FE/FD握手
@@ -77,5 +82,6 @@ TIM3 TRGO
 - 不把ADC/DMA/FFT算法塞入`display.c`；
 - 不恢复“只截第一个周期再拉伸”的旧时域路径；
 - 不改变已稳定的HMI协议、曲线ID上报、FE/FD握手和时域方向补偿；
-- 后续实际信号联调从V2.0.0继续，先验证真实ADC连续帧触发稳定性、ADC1输入、
+- 后续实际信号联调从V2.1.0继续，先验证真实ADC连续帧触发稳定性、Huber
+  实际毛刺A/B、ADC1输入、
   频率/幅值误差和相位覆盖，再决定是否让Goertzel结果成为正式输出。

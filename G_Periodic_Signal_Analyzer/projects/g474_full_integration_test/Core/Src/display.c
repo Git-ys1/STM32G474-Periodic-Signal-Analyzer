@@ -13,6 +13,8 @@
 #define TJC_FRAME_END                0x5AU
 #define TJC_DASHBOARD_CODE           0x01U
 #define TJC_CURVE_CHANNEL            0U
+#define TJC_TRIGGER_MODE_CODE        0x07U
+#define TJC_HUBER_MODE_CODE          0x08U
 
 /* dashboard页面内两块曲线控件的固定显示尺寸。 */
 #define DISPLAY_CURVE_WIDTH          794U
@@ -58,6 +60,8 @@ static volatile TJC_DashboardInfo s_dashboard = {0U, 0U, false};
 static volatile uint8_t s_visible_periods = 1U;
 static volatile DisplayTriggerMode s_trigger_mode =
     DISPLAY_TRIGGER_RISING_ZERO;
+static volatile uint8_t s_requested_huber_enabled = 0U;
+static volatile bool s_huber_mode_update_pending = false;
 static volatile UI_Action s_pending_action = UI_ACTION_NONE;
 static volatile DisplayRunMode s_run_mode = DISPLAY_RUN_STOPPED;
 static uint32_t s_next_refresh_tick = 0U;
@@ -1252,7 +1256,7 @@ static void TJC_ProcessCustomFrame(const uint8_t *frame,
 
     if ((length == 5U) &&
         (frame[1] == 0x02U) &&
-        (frame[2] == 0x07U))
+        (frame[2] == TJC_TRIGGER_MODE_CODE))
     {
         /*
          * 触发下拉框发送当前选项ID：
@@ -1261,6 +1265,21 @@ static void TJC_ProcessCustomFrame(const uint8_t *frame,
         Display_SetTriggerMode(
             (DisplayTriggerMode)frame[3]
         );
+        return;
+    }
+
+    if ((length == 5U) &&
+        (frame[1] == 0x02U) &&
+        (frame[2] == TJC_HUBER_MODE_CODE) &&
+        (frame[3] <= 1U))
+    {
+        /*
+         * 状态开关发送：
+         * A5 02 08 enabled 5A，enabled=0普通折叠，1为Huber。
+         * UART中断只记录请求，MAD和第二遍折叠留给主循环执行。
+         */
+        s_requested_huber_enabled = frame[3];
+        s_huber_mode_update_pending = true;
         return;
     }
 
@@ -1431,6 +1450,8 @@ void Display_Init(UART_HandleTypeDef *huart)
     s_dashboard.valid = false;
     s_visible_periods = 1U;
     s_trigger_mode = DISPLAY_TRIGGER_RISING_ZERO;
+    s_requested_huber_enabled = 0U;
+    s_huber_mode_update_pending = false;
     s_pending_action = UI_ACTION_NONE;
     s_run_mode = DISPLAY_RUN_STOPPED;
     s_next_refresh_tick = 0U;
@@ -1523,6 +1544,41 @@ void Display_Task(void)
     if (s_uart == NULL)
     {
         return;
+    }
+
+    /*
+     * 状态开关请求来自USART中断；在主循环中用同一帧ADC重建，
+     * 避免在中断内执行2048点MAD和第二遍折叠。
+     */
+    if (s_huber_mode_update_pending)
+    {
+        uint8_t requested_huber_enabled;
+        AnalyzerWaveformFoldMode requested_mode =
+            ANALYZER_WAVEFORM_FOLD_ORDINARY;
+
+        s_huber_mode_update_pending = false;
+        requested_huber_enabled = s_requested_huber_enabled;
+        requested_mode =
+            (requested_huber_enabled != 0U)
+            ? ANALYZER_WAVEFORM_FOLD_HUBER
+            : ANALYZER_WAVEFORM_FOLD_ORDINARY;
+
+        if (AnalyzerBridge_SetWaveformFoldMode(requested_mode) &&
+            s_dashboard.valid &&
+            (s_run_mode != DISPLAY_RUN_STOPPED) &&
+            ((s_pending_action == UI_ACTION_NONE) ||
+             (s_pending_action == UI_ACTION_DRAW_TIME_1) ||
+             (s_pending_action == UI_ACTION_DRAW_TIME_3)))
+        {
+            /*
+             * 折叠算法只改变时域波形；立即重画时域，不重复发送
+             * 频谱和六项测量文本。
+             */
+            s_pending_action =
+                (s_visible_periods == 3U)
+                ? UI_ACTION_DRAW_TIME_3
+                : UI_ACTION_DRAW_TIME_1;
+        }
     }
 
     /*

@@ -98,6 +98,17 @@ class CoverageMetrics:
 
 
 @dataclass(frozen=True)
+class HuberFoldDiagnostics:
+    """Robust-scale and sample-weight diagnostics for a Huber fold."""
+
+    robust_scale_mv: float
+    huber_delta_mv: float
+    downweighted_sample_count: int
+    downweighted_fraction: float
+    minimum_sample_weight: float
+
+
+@dataclass(frozen=True)
 class HarmonicFitMetrics:
     """Least-squares harmonic-model reconstruction quality."""
 
@@ -472,6 +483,130 @@ def phase_fold_waveform(
 
     waveform -= float(np.mean(waveform))
     return waveform, weights, phases
+
+
+def huber_phase_fold_waveform(
+    adc_codes: np.ndarray,
+    volts_per_code: float,
+    sample_rate_hz: float,
+    fold_frequency_hz: float,
+    phase_bin_count: int = DEFAULT_PHASE_BIN_COUNT,
+    huber_k: float = 1.345,
+    minimum_delta_lsb: float = 1.5,
+) -> Tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    HuberFoldDiagnostics,
+]:
+    """
+    Fold ADC samples twice, downweighting first-pass residual outliers.
+
+    The first pass is the unchanged ordinary phase fold.  Its periodic linear
+    prediction is used only to calculate Huber sample weights; the second pass
+    always folds the original centered ADC samples.
+    """
+
+    if volts_per_code <= 0.0:
+        raise ValueError("ADC每码电压必须大于0。")
+    if adc_codes.size == 0:
+        raise ValueError("ADC数组不能为空。")
+    if sample_rate_hz <= 0.0:
+        raise ValueError("采样率必须大于0。")
+    if fold_frequency_hz <= 0.0:
+        raise ValueError("折叠频率必须大于0。")
+    if phase_bin_count < 1:
+        raise ValueError("相位槽数必须大于0。")
+    if huber_k <= 0.0:
+        raise ValueError("Huber系数必须大于0。")
+    if minimum_delta_lsb <= 0.0:
+        raise ValueError("Huber阈值下限必须大于0 LSB。")
+
+    initial_waveform, _, phases = phase_fold_waveform(
+        adc_codes,
+        volts_per_code,
+        sample_rate_hz,
+        fold_frequency_hz,
+        phase_bin_count,
+    )
+
+    positions = phases * phase_bin_count
+    integer_positions = np.floor(positions)
+    index0 = integer_positions.astype(np.int64) % phase_bin_count
+    fractions = positions - integer_positions
+    index1 = (index0 + 1) % phase_bin_count
+    predicted_mv = (
+        initial_waveform[index0]
+        + fractions
+        * (initial_waveform[index1] - initial_waveform[index0])
+    )
+
+    centered_mv = (
+        adc_codes.astype(np.float64) - float(np.mean(adc_codes))
+    ) * volts_per_code * 1000.0
+    residual = centered_mv - predicted_mv
+    residual_center = float(np.median(residual))
+    centered_residual = residual - residual_center
+    absolute_deviation = np.abs(centered_residual)
+    robust_scale_mv = 1.4826 * float(np.median(absolute_deviation))
+    adc_lsb_mv = volts_per_code * 1000.0
+    delta_mv = max(
+        huber_k * robust_scale_mv,
+        minimum_delta_lsb * adc_lsb_mv,
+    )
+
+    sample_weights = np.ones_like(residual)
+    large = absolute_deviation > delta_mv
+    sample_weights[large] = delta_mv / absolute_deviation[large]
+
+    sums = np.zeros(phase_bin_count, dtype=np.float64)
+    weights = np.zeros(phase_bin_count, dtype=np.float64)
+    left_weights = (1.0 - fractions) * sample_weights
+    right_weights = fractions * sample_weights
+    np.add.at(sums, index0, centered_mv * left_weights)
+    np.add.at(weights, index0, left_weights)
+    nonzero = fractions > 1.0e-6
+    np.add.at(
+        sums,
+        index1[nonzero],
+        centered_mv[nonzero] * right_weights[nonzero],
+    )
+    np.add.at(weights, index1[nonzero], right_weights[nonzero])
+
+    waveform = np.full(phase_bin_count, np.nan, dtype=np.float64)
+    valid = weights > 1.0e-6
+    waveform[valid] = sums[valid] / weights[valid]
+    valid_indices = np.flatnonzero(valid)
+    if valid_indices.size == 0:
+        waveform = np.zeros(phase_bin_count, dtype=np.float64)
+    else:
+        missing_indices = np.flatnonzero(~valid)
+        if missing_indices.size:
+            waveform[missing_indices] = np.interp(
+                missing_indices.astype(np.float64),
+                valid_indices.astype(np.float64),
+                waveform[valid_indices],
+                period=phase_bin_count,
+            )
+        waveform -= float(np.mean(waveform))
+
+    downweighted_count = int(np.count_nonzero(large))
+    diagnostics = HuberFoldDiagnostics(
+        robust_scale_mv=robust_scale_mv,
+        huber_delta_mv=delta_mv,
+        downweighted_sample_count=downweighted_count,
+        downweighted_fraction=(
+            downweighted_count / adc_codes.size
+            if adc_codes.size
+            else 0.0
+        ),
+        minimum_sample_weight=(
+            float(np.min(sample_weights))
+            if sample_weights.size
+            else 1.0
+        ),
+    )
+    return waveform, weights, phases, diagnostics
 
 
 def periodic_linear_display(

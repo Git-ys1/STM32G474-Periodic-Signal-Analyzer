@@ -11,8 +11,13 @@
 仓库：F:\Project\stm32G474VETx\TI
 项目：F:\Project\stm32G474VETx\TI\G_Periodic_Signal_Analyzer
 工程：projects\g474_full_integration_test
-发布：v2.0.0（基于v1.9.0 / 9b023b5）
+发布：v2.1.0（基于v1.9.0 / 9b023b5）
 ```
+
+V2.1.0普通/Huber折叠已发布：固件已零警告构建并烧录，板上
+普通→Huber→普通冒烟无故障，当前模式恢复普通默认。
+HMI配置与验证证据见`docs/V2.1_HUBER_FOLD_SWITCH_2026-07-31.md`；不要
+覆盖用户后续真实ADC测试文件。
 
 ## 二、必须按顺序阅读
 
@@ -60,6 +65,7 @@ git -C 'F:\Project\stm32G474VETx\TI' log -n 12 --oneline --decorate
 ADC1/PA0 → DMA adc_b[2048] → 队友FFT和幅值计算
 → AnalyzerBridge_PublishReal()
 → 频率细化和256槽相位折叠
+→ 可选Huber第二遍折叠（默认关闭，仅改时域波形）
 → Display_Task()
 → 794点时域曲线、频谱线和文本
 → USART3 FE/FD透传 → 淘晶驰dashboard
