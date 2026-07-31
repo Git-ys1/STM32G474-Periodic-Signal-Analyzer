@@ -8,6 +8,21 @@ extern "C" {
 #include "stm32g4xx_hal.h"
 
 /**
+ * @brief 时域显示触发模式。
+ *
+ * 触发只决定一个周期波形从哪个相位开始显示，不修改ADC采样、Vpp、
+ * RMS、频率或频谱结果。
+ */
+typedef enum
+{
+    DISPLAY_TRIGGER_OFF = 0,
+    DISPLAY_TRIGGER_RISING_ZERO,
+    DISPLAY_TRIGGER_FALLING_ZERO,
+    DISPLAY_TRIGGER_POSITIVE_PEAK,
+    DISPLAY_TRIGGER_MODE_COUNT
+} DisplayTriggerMode;
+
+/**
  * @brief 初始化显示模块。
  *
  * 初始化淘晶驰通信，等待屏幕启动后进入dashboard页面。
@@ -45,6 +60,16 @@ void Display_RequestRefresh(void);
  * @brief 通过原HMI按钮命令处理入口，启动随机测试自动刷新。
  */
 void Display_RequestTest(void);
+
+/**
+ * @brief 设置时域显示触发模式并在运行状态下安排一次时域重绘。
+ */
+void Display_SetTriggerMode(DisplayTriggerMode mode);
+
+/**
+ * @brief 获取当前时域显示触发模式。
+ */
+DisplayTriggerMode Display_GetTriggerMode(void);
 
 #ifdef __cplusplus
 }
