@@ -14,4 +14,7 @@
 
 *.lib binary
 *.scvd binary
-
+*.pdf binary
+*.docx binary
+*.png binary
+*.vsdx binary

@@ -57,22 +57,12 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define LED_B_Pin GPIO_PIN_0
-#define LED_B_GPIO_Port GPIOC
-#define LED_G_Pin GPIO_PIN_1
-#define LED_G_GPIO_Port GPIOC
-#define LED_R_Pin GPIO_PIN_2
-#define LED_R_GPIO_Port GPIOC
 #define RELAY1_Pin GPIO_PIN_0
 #define RELAY1_GPIO_Port GPIOB
 #define RELAY2_Pin GPIO_PIN_1
 #define RELAY2_GPIO_Port GPIOB
 #define RELAY3_Pin GPIO_PIN_2
 #define RELAY3_GPIO_Port GPIOB
-#define AD835_MODE_Pin GPIO_PIN_10
-#define AD835_MODE_GPIO_Port GPIOB
-#define RELAY4_Pin GPIO_PIN_12
-#define RELAY4_GPIO_Port GPIOC
 #define BUZZER_Pin GPIO_PIN_2
 #define BUZZER_GPIO_Port GPIOD
 #define KEY_Pin GPIO_PIN_8

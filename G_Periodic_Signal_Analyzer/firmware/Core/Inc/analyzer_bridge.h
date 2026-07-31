@@ -95,7 +95,7 @@ typedef struct
 void AnalyzerBridge_Init(void);
 
 /**
- * @brief 直接用全部ADC样本做Huber谐波模型拟合并计算输入端峰峰值。
+ * @brief 直接用全部VO浮点电压样本做Huber谐波模型拟合并计算输入端峰峰值。
  *
  * 模型为DC项加FFT已识别整数次谐波的正弦/余弦项。函数先做普通最小二乘，
  * 再做三轮Huber IRLS；最终在4096个等相位点上合成模型并求最大值减最小值。
@@ -105,9 +105,8 @@ void AnalyzerBridge_Init(void);
  * @param model_vpp_mv 返回折算到信号源输入端的模型峰峰值，单位mV。
  */
 bool AnalyzerBridge_CalculateRobustModelVpp(
-    const uint16_t *adc_codes,
+    const float *samples_v,
     uint16_t sample_count,
-    float volts_per_code,
     float sample_rate_hz,
     float refined_fundamental_hz,
     float reported_fundamental_hz,
@@ -117,15 +116,12 @@ bool AnalyzerBridge_CalculateRobustModelVpp(
     float *model_vpp_mv);
 
 /**
- * @brief 发布一次队友算法已经完成的真实分析结果。
+ * @brief 在队友Vpp_R()改写VO之前，准备一次真实波形结果。
  *
- * @param adc_codes 原始ADC采样码。桥接层使用完整缓冲区按基频相位折叠，
- *                  生成一个周期的256点显示快照。
- * @param sample_count 原始采样点数。
- * @param volts_per_code 每个ADC码对应的电压，单位V。
+ * @param samples_v 队友已交错并换算为电压的VO浮点数组，单位V。桥接层不再
+ *                  读取原始ADC码，也不再自行执行3.3/4096换算。
+ * @param sample_count VO采样点数，当前为4096。
  * @param sample_rate_hz 实际或当前算法使用的采样率，单位Hz。
- * @param vpp_v 队友算法计算的峰峰值，单位V。
- * @param vrms_v 队友算法计算的真有效值，单位V。
  * @param teammate_flag 队友最新版flag，当前2/3分别表示2/3个谱峰。
  * @param frequencies_hz 三个谱峰频率，单位Hz。
  * @param amplitudes_v 三个谱峰峰值幅度，单位V。
@@ -133,16 +129,22 @@ bool AnalyzerBridge_CalculateRobustModelVpp(
  * 频谱结果会在桥接层按频率升序排列并统一转换为峰值mV；
  * 显示层不再直接读取队友的散乱全局变量。
  */
-void AnalyzerBridge_PublishReal(
-    const uint16_t *adc_codes,
+void AnalyzerBridge_PrepareReal(
+    const float *samples_v,
     uint16_t sample_count,
-    float volts_per_code,
     float sample_rate_hz,
-    float vpp_v,
-    float vrms_v,
     uint8_t teammate_flag,
     const float frequencies_hz[ANALYZER_MAX_COMPONENTS],
     const float amplitudes_v[ANALYZER_MAX_COMPONENTS]);
+
+/**
+ * @brief 在队友Vpp_R()完成后，把Vpp/RMS写入已准备结果并原子发布。
+ *
+ * 采用“先准备VO波形、后发布测量值”两阶段接口，是因为队友Vpp_R()会原地
+ * 修改VO。显示层只会看到完整提交后的AnalyzerResult，不会读到半成品。
+ */
+void AnalyzerBridge_PublishPreparedReal(float vpp_v,
+                                        float vrms_v);
 
 /**
  * @brief 获取当前显示应使用的最新稳定结果快照。
@@ -173,9 +175,10 @@ void AnalyzerBridge_UseRealResult(void);
 bool AnalyzerBridge_IsTestOverrideActive(void);
 
 /**
- * @brief 切换时域波形折叠算法，并用当前同一帧ADC数据立即重建。
+ * @brief 切换时域波形折叠算法。
  *
- * @return true表示模式有效且当前快照（若存在）已完成重建。
+ * 真实VO不在桥接层重复缓存，真实模式会在下一帧到达时用新模式重建；测试
+ * 数据仍可立即重建。这样既避免复制4096个float，也避免重新读取原始ADC码。
  */
 bool AnalyzerBridge_SetWaveformFoldMode(
     AnalyzerWaveformFoldMode mode);

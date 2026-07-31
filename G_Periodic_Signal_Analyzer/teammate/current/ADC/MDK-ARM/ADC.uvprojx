@@ -416,11 +416,6 @@
               <FilePath>../../Core/Src/adc.c</FilePath>
             </File>
             <File>
-              <FileName>dac.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../../Core/Src/dac.c</FilePath>
-            </File>
-            <File>
               <FileName>dma.c</FileName>
               <FileType>1</FileType>
               <FilePath>../../Core/Src/dma.c</FilePath>
@@ -495,6 +490,16 @@
               <FileName>stm32g4xx_hal_msp.c</FileName>
               <FileType>1</FileType>
               <FilePath>../../Core/Src/stm32g4xx_hal_msp.c</FilePath>
+            </File>
+            <File>
+              <FileName>display.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\Src\display.c</FilePath>
+            </File>
+            <File>
+              <FileName>analyzer_bridge.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Core\Src\analyzer_bridge.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -580,16 +585,6 @@
               <FileName>stm32g4xx_hal_cortex.c</FileName>
               <FileType>1</FileType>
               <FilePath>../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_cortex.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32g4xx_hal_dac.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_dac.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32g4xx_hal_dac_ex.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_dac_ex.c</FilePath>
             </File>
             <File>
               <FileName>stm32g4xx_hal_tim.c</FileName>

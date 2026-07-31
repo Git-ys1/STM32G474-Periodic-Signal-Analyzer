@@ -138,7 +138,7 @@ prints sw_huber.val,1
 printh 5A
 ```
 
-固件的USART中断只记录`enabled`请求，2048点残差、MAD和第二遍折叠在主循环
+固件的USART中断只记录`enabled`请求，4096点残差、MAD和第二遍折叠在主循环
 执行。切换时复用当前最新一帧ADC；测试模式复用当前测试组，不随机换组，便于直接
 观察普通与增强Huber曲线差别。状态1先执行两遍Huber，再保留队友FFT已识别的
 整数次谐波；只改变`AnalyzerResult.waveform_mv[256]`，不修改原始ADC、
@@ -205,7 +205,7 @@ V1.4不再只依赖主循环轮询读取HMI字节。USART3采用单字节中断�
 3. `HAL_UART_ErrorCallback()`清除ORE、flush接收寄存器并重新启动；
 4. 页面与按钮事件仅设置待处理状态，实际曲线传输仍在主循环执行。
 
-这样可以避免2048点FFT期间主循环长时间不读UART导致ORE，同时避免在中断中执行
+这样可以避免4096点FFT期间主循环长时间不读UART导致ORE，同时避免在中断中执行
 阻塞式`addt`发送。
 
 禁止出现：

@@ -2,7 +2,9 @@
 
 STM32G474VET6 + 淘晶驰 7 英寸串口屏的周期信号测量与显示工程。
 
-当前发布版本：**V2.4.0 紧凑坐标轴与独立Mpp版**。
+当前发布版本：**V2.5.0 双ADC 4096点VO直连版**。
+当前基线已经固定为ADC1/PA0与ADC2/PA1各2048点、交错得到4096点，等效
+采样率约2.048193 MS/s。主线已完成编译、烧录和运行验证。
 唯一主线固件位于 [`firmware/`](firmware/README.md)，不要再从历史 demo 或
 队友快照中直接开发。
 
@@ -16,6 +18,7 @@ STM32G474VET6 + 淘晶驰 7 英寸串口屏的周期信号测量与显示工程�
 | [`plan/`](plan/README.md) | 用户编写的各阶段任务书，保持原组织 | 只读依据 |
 | [`tools/`](tools/README.md) | PC 端波形、覆盖率和真实 ADC 分析工具 | 是 |
 | [`tests/`](tests/README.md) | 测试输入和工具生成的验证结果 | 是 |
+| [`experiments/`](experiments/README.md) | 与主线隔离的硬件能力验证工程 | 否 |
 | [`deliverables/`](deliverables/README.md) | 发给队友的独立交付包 | 按版本使用 |
 | [`tmp/`](tmp/README.md) | 并行任务的临时构建源和中间稿，默认不提交 | 否 |
 | [`archive/`](archive/README.md) | 已废弃工程和仅供追溯的内容 | 否 |
@@ -24,9 +27,12 @@ STM32G474VET6 + 淘晶驰 7 英寸串口屏的周期信号测量与显示工程�
 ## 当前主链
 
 ```text
-TIM3 → ADC1/PA0 → DMA adc_b[2048]
+TIM3 CH4上升/下降沿
+→ ADC1/PA0 + ADC2/PA1
+→ DMA adc_b[2048] + adc_b1[2048]
+→ 队友生成浮点电压VO[4096]，约2.048193 MS/s
 → 队友 FFT / Vpp / RMS
-→ AnalyzerBridge
+→ AnalyzerBridge直接消费VO，不再读取原始ADC码
 → Huber + 已识别谐波投影
 → Display_Task
 → USART3 → 淘晶驰 dashboard
@@ -40,7 +46,7 @@ TIM3 → ADC1/PA0 → DMA adc_b[2048]
 | 查看当前状态 | [`docs/00_overview/CURRENT_STATUS.md`](docs/00_overview/CURRENT_STATUS.md) |
 | 新会话接管 | [`docs/06_handoff/README.md`](docs/06_handoff/README.md) |
 | 队友融合 | [`docs/02_integration/TEAMMATE_INTEGRATION_QUICK_GUIDE.md`](docs/02_integration/TEAMMATE_INTEGRATION_QUICK_GUIDE.md) |
-| 查看V2.4发布 | [`docs/04_releases/V2.4_COMPACT_AXIS_AND_MODEL_VPP_2026-07-31.md`](docs/04_releases/V2.4_COMPACT_AXIS_AND_MODEL_VPP_2026-07-31.md) |
+| 查看V2.5发布 | [`docs/04_releases/V2.5_DUAL_ADC_4096_VO_BRIDGE_2026-08-01.md`](docs/04_releases/V2.5_DUAL_ADC_4096_VO_BRIDGE_2026-08-01.md) |
 
 ## 冻结规则
 

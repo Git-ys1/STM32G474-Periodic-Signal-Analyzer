@@ -84,7 +84,8 @@ $hex = 'F:\Project\stm32G474VETx\TI\G_Periodic_Signal_Analyzer\firmware\ADC\MDK-
 
 - PC 是否在主循环、HardFault、Error_Handler 或启动 BKPT；
 - `AdcConvEnd` 是否变化；
-- `adc_b[]` 是否有非零、非饱和且随输入变化的数据；
+- `adc_b[2048]`、`adc_b1[2048]`是否有非零、非饱和且随输入变化的数据，
+  `VO[4096]`是否按ADC1/ADC2顺序正确交错；
 - `AnalyzerResult.sequence` 或桥接内部序号是否持续增长；
 - `s_uart` 是否为有效 `huart3`；
 - `s_dashboard.valid`、time/spec ID 是否已收到；
@@ -93,7 +94,10 @@ $hex = 'F:\Project\stm32G474VETx\TI\G_Periodic_Signal_Analyzer\firmware\ADC\MDK-
 
 过去用 ST-Link 发现过：大型局部结构体压坏主栈、ArmClang 启动 `BKPT 0xAB`、固件实际仍在跑但 UART ORE、桥接序号持续增长而页面没握手。这个方法属于长期调试经验：先确认 MCU 停在哪里、关键变量有没有推进，再决定查 ADC、桥接还是 HMI。
 
-若需要导出 `adc_b[2048]`，应在 DMA 完成后、重新启动前暂停，用 debugger memory view/save 读取 4096 字节。不要通过 HMI 的 USART3 在运行中打印 2048 个数字，以免干扰协议。导出时同时记下采样率、VDDA、信号源和示波器设置。
+若需要导出采样帧，应在两路DMA完成后、重新启动前暂停，用debugger
+memory view/save同时保存`adc_b[2048]`、`adc_b1[2048]`和桥接调用前的
+`VO[4096]`。不要通过HMI的USART3在运行中打印整帧数字，以免干扰协议。
+导出时同时记下采样率、两路ADC接线、VDDA、信号源和示波器设置。
 
 ## 5. HMI模拟器与实物验收
 
@@ -215,7 +219,7 @@ Git 提交和 push 只有在用户明确要求发布时执行。若只要求诊�
 FD，核对`addt`声明点数与实际发送字节数、页面是否仍有效，以及同步等待期间是否
 收到其他错误状态帧。若曲线正常而文本数字为空，检查newlib-nano浮点格式化，不要
 误删文本控件。若测试模式正常而真实模式异常，说明HMI和绘图链大概率可用，应转向
-`adc_b`、队友测量结果和桥接快照；反之真实分析序号增长但两种模式都无图，应查
+双路ADC数组、交错`VO`、队友测量结果和桥接快照；反之真实分析序号增长但两种模式都无图，应查
 显示协议、UART和页面握手。
 
 若屏幕数值与示波器不一致，必须先确认两者是同一输入位置、同一负载、同一稳定

@@ -1655,7 +1655,7 @@ static void TJC_ParserPushByte(uint8_t byte)
 /**
  * @brief USART3逐字节接收完成回调。
  *
- * @note  使用中断接收是为了避免2048点FFT和排序运行期间发生ORE，
+ * @note  使用中断接收是为了避免4096点FFT和排序运行期间发生ORE，
  *        每收到一个字节立即送入原有HMI帧解析器，然后重新挂起下一字节。
  */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
@@ -1801,8 +1801,8 @@ void Display_Task(void)
     }
 
     /*
-     * 状态开关请求来自USART中断；在主循环中用同一帧ADC重建，
-     * 避免在中断内执行2048点MAD和第二遍折叠。
+     * 状态开关请求来自USART中断；测试源可在主循环重建同一帧，真实源
+     * 则从下一帧VO开始应用，避免在中断内执行4096点MAD和第二遍折叠。
      */
     if (s_huber_mode_update_pending)
     {

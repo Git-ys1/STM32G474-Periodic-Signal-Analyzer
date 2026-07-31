@@ -19,7 +19,6 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "adc.h"
-#include "dac.h"
 #include "dma.h"
 #include "tim.h"
 #include "usart.h"
@@ -30,11 +29,12 @@
 #include "AD9833.h"
 #include "arm_math.h"
 #include "arm_const_structs.h"
+#include "stdio.h"
+#include "goertzel_sync.h"
+#include "math.h"
 #include "analyzer_bridge.h"
 #include "display.h"
 #include "goertzel_sync.h"
-#include "math.h"
-#include "stdio.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -52,21 +52,15 @@
 #define IN3_C() HAL_GPIO_WritePin(GPIOB,GPIO_PIN_2,GPIO_PIN_SET)
 #define IN4_O() HAL_GPIO_WritePin(GPIOC,GPIO_PIN_12,GPIO_PIN_RESET)
 #define IN4_C() HAL_GPIO_WritePin(GPIOC,GPIO_PIN_12,GPIO_PIN_SET)
-#define ADC_SIZE 2048
-#define ANALYZER_SAMPLE_RATE_HZ 1024090.0f
-#define ADC_VOLTS_PER_CODE      (3.3f / 4096.0f)
-/*
- * KEY1实体按键控制总开关：
- * 1U：启用PB8短按切换1T/3T、长按执行原“测试”按钮命令；
- * 0U：完全关闭本功能，保留原有HMI与显示链路。
- */
+#define ADC_SIZE 4096
+/* float ר�� */
+#define SWAP_F(a, b)  do { float _t = (a); (a) = (b); (b) = _t; } while (0)
+uint16_t adc_b[ADC_SIZE/2]={0},adc_b1[ADC_SIZE/2]={0};
+__IO uint8_t AdcConvEnd = 0;
+#define ANALYZER_SAMPLE_RATE_HZ  2048193.0f
 #define BOARD_KEY_CONTROL_ENABLE 1U
 #define BOARD_KEY_DEBOUNCE_MS    30U
 #define BOARD_KEY_LONG_PRESS_MS  1000U
-/* float ר�� */
-#define SWAP_F(a, b)  do { float _t = (a); (a) = (b); (b) = _t; } while (0)
-uint16_t adc_b[ADC_SIZE]={0};
-__IO uint8_t AdcConvEnd = 0;
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -77,29 +71,20 @@ __IO uint8_t AdcConvEnd = 0;
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-/*
- * ArmClang 6.7 does not automatically emit this marker for the current
- * main(void).  Without it, the C runtime tries to obtain argc/argv through
- * semihosting before main() and executes BKPT 0xAB on standalone hardware.
- */
-#if defined(__ARMCC_VERSION)
-__attribute__((used)) int __ARM_use_no_argv;
-#endif
-
 float32_t input[ADC_SIZE*2+4],output[ADC_SIZE/2],VO[ADC_SIZE],V0=0;
 float32_t max;uint32_t index;
-float F,V,FB,VB,VC,FC,TE;
+float F,V,FB,VB,VC,FC,TE,Vr=0;
 uint32_t valid_len;
 uint32_t discard_len;
 uint16_t flag=0;
 
+#if defined(__ARMCC_VERSION)
+__attribute__((used)) int __ARM_use_no_argv;
+#endif
+
 #if BOARD_KEY_CONTROL_ENABLE
-/*
- * EXTI回调只写入按下时刻和跟踪标志。
- * UART发送与曲线重绘必须留在主循环，不能放进中断。
- */
-static volatile uint32_t s_key_press_tick = 0U;
-static volatile uint8_t s_key_press_active = 0U;
+static volatile uint32_t s_key_press_tick;
+static volatile uint8_t s_key_press_active;
 #endif
 /* USER CODE END PV */
 
@@ -111,6 +96,46 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+#if BOARD_KEY_CONTROL_ENABLE
+void HAL_GPIO_EXTI_Callback(uint16_t pin)
+{
+    if ((pin == KEY_Pin) &&
+        (s_key_press_active == 0U) &&
+        (HAL_GPIO_ReadPin(KEY_GPIO_Port, KEY_Pin) == GPIO_PIN_SET))
+    {
+        s_key_press_tick = HAL_GetTick();
+        s_key_press_active = 1U;
+    }
+}
+
+static void BoardKey_Task(void)
+{
+    uint32_t held_ms;
+
+    if ((s_key_press_active == 0U) ||
+        (HAL_GPIO_ReadPin(KEY_GPIO_Port, KEY_Pin) == GPIO_PIN_SET))
+    {
+        return;
+    }
+
+    held_ms = HAL_GetTick() - s_key_press_tick;
+    s_key_press_active = 0U;
+
+    if (held_ms < BOARD_KEY_DEBOUNCE_MS)
+    {
+        return;
+    }
+
+    if (held_ms >= BOARD_KEY_LONG_PRESS_MS)
+    {
+        Display_RequestTest();
+    }
+    else
+    {
+        Display_TogglePeriods();
+    }
+}
+#endif
 
 void sof()
 {
@@ -134,127 +159,113 @@ void sof()
 void fft()
 {
 	
-	arm_cfft_f32(&arm_cfft_sR_f32_len2048,input,0,1);
+	arm_cfft_f32(&arm_cfft_sR_f32_len4096,input,0,1);
 	 arm_cmplx_mag_f32(input, output, ADC_SIZE / 2 );
+	for(int i=0;i<1024;i++)
+	{
+		if(i<300)
+			output[i]/=5.92;
+		else if(i<420)
+			output[i]/=6.1;
+		else if(i<520)
+			output[i]/=6.19;
+		else if(i<560)
+			output[i]/=6.25;
+		else if(i<600)
+			output[i]/=6.32;
+		else if(i<680)
+			output[i]/=6.43;
+		else if(i<720)
+			output[i]/=6.62;
+		else if(i<800)
+			output[i]/=6.71;
+		else if(i<840)
+			output[i]/=6.83;
+		else if(i<880)
+			output[i]/=6.92;
+		else
+			output[i]/=7.16;
+	}
 	//arm_cmplx_mag_squared_f32(input,output,ADC_SIZE/2);
 	index=0;
 	max=output[1];
-	arm_max_f32(&output[1],ADC_SIZE/2-1,&max,&index);
-	float sum=0;
-	
-	for(int i=-8;i<9;i++)
+	arm_max_f32(&output[1],1023,&max,&index);
+	float sum=0,summ=0;
+
+	F=(index+1)*2048000.0/4096.0;
+		//V=2.0*max/4096.0;
+	for(int i=-4;i<5;i++)
 		{
 			sum+=output[index+i+1]*output[index+i+1];output[index+i+1]=0;
 		}
-	F=(index+1)*1024000.0/2048.0;
-	//V=2.0*max/2048.0;
-	V=2.0*sqrtf(sum)/2048.0;
-	
-	arm_max_f32(&output[1],ADC_SIZE/2-1,&max,&index);
+	V=2.0*sqrtf(sum)/4096.0;
+	summ+=sum;
+
+	arm_max_f32(&output[1],1023,&max,&index);
 	sum=0;
-	for(int i=-8;i<9;i++)
+	FB=(index+1)*2048000.0/4096.0;
+	for(int i=-4;i<5;i++)
 		{
 			sum+=output[index+i+1]*output[index+i+1];output[index+i+1]=0;
 		}
-	FB=(index+1)*1024000.0/2048.0;
+	//FB=(index+1)*2048000.0/4096.0;
 	//VB=2.0*max/2048.0;
-	VB=2.0*sqrtf(sum)/2048.0;
+	VB=2.0*sqrtf(sum)/4096.0;
+	summ+=sum;
 	
-	arm_max_f32(&output[1],ADC_SIZE/2-1,&max,&index);
+	arm_max_f32(&output[1],1023,&max,&index);
 	sum=0;
-	for(int i=-8;i<9;i++)
+	FC=(index+1)*2048000.0/4096.0;
+	for(int i=-4;i<5;i++)
 		{
 			sum+=output[index+i+1]*output[index+i+1];output[index+i+1]=0;
 		}
-	FC=(index+1)*1024000.0/2048.0;
+	//FC=(index+1)*2048000.0/4096.0;
 	//VC=2.0*max/2048.0;
-	VC=2.0*sqrtf(sum)/2048.0;
+	VC=2.0*sqrtf(sum)/4096.0;
+
 	
-	if(VC<0.004)
-		flag=2;
+	if(VC<0.00477 || (FC<FB && FC<F))
+	{
+		flag=2;FC=1024000;
+	}
 	else
 	{
-		sof();
+		float min_ab = (F < FB) ? F : FB;
+		if((uint32_t)FC % (uint32_t)min_ab == 0)
+		{
+			flag=3;summ+=sum;
+		}
 		//if((uint32_t)FB % (uint32_t)F!=0 || (uint32_t)FC % (uint32_t)F!=0)
-			flag=3;
-		
+		else
+		{
+			flag=2;
+			FC=1024000;
+		}
 	}
-		
-	V0=output[0]/2048.0;
+	sof();
+	Vr=	sqrtf(2.0*summ)/4096.0;
+	V0=output[0]/4096.0;
 }
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
 	if(hadc == &hadc1)
 	{
-		AdcConvEnd=1;
+		AdcConvEnd+=1;
 HAL_ADC_Stop_DMA(&hadc1);
 	}
+	if(hadc == &hadc2)
+	{
+		AdcConvEnd+=1;
+HAL_ADC_Stop_DMA(&hadc2);
+	}
 }
-
-#if BOARD_KEY_CONTROL_ENABLE
-/**
- * @brief KEY1上升沿中断回调。
- *
- * PB8松开时为低电平、按下时为高电平。中断中只记录按下时刻，
- * 不等待松开，也不调用显示或UART函数。
- */
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-    if ((GPIO_Pin == KEY_Pin) &&
-        (s_key_press_active == 0U) &&
-        (HAL_GPIO_ReadPin(KEY_GPIO_Port, KEY_Pin) == GPIO_PIN_SET))
-    {
-        s_key_press_tick = HAL_GetTick();
-        s_key_press_active = 1U;
-    }
-}
-
-/**
- * @brief 在主循环中检测KEY1松开并执行短按/长按动作。
- *
- * 按住不足30 ms视为抖动；30~999 ms执行原1T/3T按钮命令；
- * 按住至少1000 ms后松开，执行原“测试”按钮命令。
- */
-static void BoardKey_Task(void)
-{
-    uint32_t press_tick;
-    uint32_t held_ms;
-
-    if ((s_key_press_active == 0U) ||
-        (HAL_GPIO_ReadPin(KEY_GPIO_Port, KEY_Pin) == GPIO_PIN_SET))
-    {
-        return;
-    }
-
-    /*
-     * PB8已经回到低电平，说明本次按压结束。
-     * 先清除活动标志，再根据持续时间安排主循环显示动作。
-     */
-    press_tick = s_key_press_tick;
-    s_key_press_active = 0U;
-    held_ms = HAL_GetTick() - press_tick;
-
-    if (held_ms < BOARD_KEY_DEBOUNCE_MS)
-    {
-        return;
-    }
-
-    if (held_ms >= BOARD_KEY_LONG_PRESS_MS)
-    {
-        Display_RequestTest();
-    }
-    else
-    {
-        Display_TogglePeriods();
-    }
-}
-#endif
 
 /* ³�����ֵ: �ðٷ�λ�������� */
 float Vpp_Robust(const float *data, uint32_t len)
 {
-    static float sorted[2048];
+    static float sorted[4096];
     uint32_t i, j;
     float key;
 
@@ -276,12 +287,12 @@ float Vpp_Robust(const float *data, uint32_t len)
     /* 3. ȡ 1% �� 99% ��λ��, ���˼������� */
 		float idx_low=0 ;           /* 1% λ�� */
     float idx_high=0; /* 99% λ�� */
-		for (i = 1; i < 11; i++) {
+		for (i = 240; i < 260; i++) {
 			idx_low+=sorted[i];
-			idx_high+=sorted[2047-i];
+			idx_high+=sorted[4095-i];
 		}
-		idx_low/=10.0;
-		idx_high/=10.0;
+		idx_low/=20.0;
+		idx_high/=20.0;
     return idx_high- idx_low;
 }
 
@@ -290,19 +301,20 @@ float Vpp_Robust(const float *data, uint32_t len)
 float Vpp_R()
 {
 			float fm=F;
-			uint32_t cycles = (uint32_t)floor(2048.0 * fm / 1024000.0);
-			double exact_len = cycles *  1024000.0 / fm;
+			uint32_t cycles = (uint32_t)floor(4096.0 * fm / 2048000.0);
+			double exact_len = cycles *  2048000.0 / fm;
 			valid_len = (uint32_t)round(exact_len);
-			discard_len = 2048 - valid_len;
+			discard_len = 4096 - valid_len;
 			for(int i=0;i<discard_len;i++)
-				VO[2047-i]=0;
-			for (int i=0; i < 2048; i++)
+				VO[4095-i]=0;
+			for(int i=0;i<4096;i++)
+				VO[i]=(VO[i]-V0);
+			for (int i=0; i < 4096; i++)
 			{
 				input[i*2]=VO[i];input[i*2+1]=0;
 			}
 			fft();
-			for(int i=0;i<2048;i++)
-				VO[i]-=V0;
+			//arm_mean_f32(VO,valid_len,&V0);
 			float Vrms=0;
 			arm_rms_f32(VO, valid_len, &Vrms);
 			return Vrms;
@@ -339,14 +351,19 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
-  MX_DAC1_Init();
   MX_USART3_UART_Init();
   MX_TIM3_Init();
   MX_ADC1_Init();
+  MX_ADC2_Init();
   /* USER CODE BEGIN 2 */
 HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
-HAL_TIM_Base_Start(&htim3);
+HAL_ADCEx_Calibration_Start(&hadc2, ADC_SINGLE_ENDED);
 HAL_ADC_Start_DMA(&hadc1,(uint32_t*)adc_b,2048);
+HAL_ADC_Start_DMA(&hadc2,(uint32_t*)adc_b1,2048);
+__DSB();
+//HAL_TIM_Base_Start(&htim3);
+HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
+//HAL_TIM_Base_Start(&htim3);
 AnalyzerBridge_Init();
 Display_Init(&huart3);
   /* USER CODE END 2 */
@@ -358,25 +375,26 @@ Display_Init(&huart3);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-		if(AdcConvEnd == 1)
+		if(AdcConvEnd == 2)
 		{
+			HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_4);
+			//HAL_ADC_Stop_DMA(&hadc1);
+			//HAL_ADC_Stop_DMA(&hadc2);
+			for (int i=0; i < 2048; i++)
+			{
+				VO[2 * i]     = adc_b[i]*3.3/4096.0;
+				VO[2 * i + 1] = adc_b1[i]*3.3/4096.0;
+			}
+			for(int i=0;i<4096;i++)
+			{
+					input[i*2]=VO[i];input[i*2+1]=0;
+			}
 			float spectrum_frequencies_hz[ANALYZER_MAX_COMPONENTS];
 			float spectrum_amplitudes_v[ANALYZER_MAX_COMPONENTS];
 			uint8_t spectrum_flag;
-			GoertzelResult goertzel_a;
-			GoertzelResult goertzel_b;
-			GoertzelResult goertzel_c;
 
-			for (int i=0; i < 2048; i++)
-			{
-				input[i*2]=adc_b[i]*3.3/4096;VO[i]=input[i*2];input[i*2+1]=0;
-			}
 			fft();
 
-			/*
-			 * Vpp_R()内部会再次执行fft()并覆盖F/V等全局结果。
-			 * 因此在保持队友算法不变的前提下，先保存第一次FFT的最终谱峰。
-			 */
 			spectrum_frequencies_hz[0] = F;
 			spectrum_frequencies_hz[1] = FB;
 			spectrum_frequencies_hz[2] = FC;
@@ -384,71 +402,36 @@ Display_Init(&huart3);
 			spectrum_amplitudes_v[1] = VB;
 			spectrum_amplitudes_v[2] = VC;
 			spectrum_flag = (uint8_t)flag;
-			
 			//float vmax,vmin;
 			//uint32_t maxid,minid;
 			//arm_max_f32(VO, 2048, &vmax, &maxid);   /* �����ֵ */
 			//arm_min_f32(VO, 2048, &vmin, &minid);   /* ����Сֵ */
 
-			float vpp =Vpp_Robust(VO,2048)  ;            /* ���ֵ */
+			float vpp =Vpp_Robust(VO,4096)  ;            /* ���ֵ */
 
-			/*
-			 * 保留队友新版的Goertzel精测链路。当前显示仍使用队友FFT的
-			 * 三组幅值，避免在未完成实机标定前改变对外结果口径。
-			 */
-			goertzel_a =
-				goertzel_sync(
+			GoertzelResult r=goertzel_sync(VO,4096,ANALYZER_SAMPLE_RATE_HZ,F),rB=goertzel_sync(VO,4096,ANALYZER_SAMPLE_RATE_HZ,FB),rC=goertzel_sync(VO,4096,ANALYZER_SAMPLE_RATE_HZ,FC);
+			AnalyzerBridge_PrepareReal(
 					VO,
 					ADC_SIZE,
 					ANALYZER_SAMPLE_RATE_HZ,
-					spectrum_frequencies_hz[0]
-				);
-			goertzel_b =
-				goertzel_sync(
-					VO,
-					ADC_SIZE,
-					ANALYZER_SAMPLE_RATE_HZ,
-					spectrum_frequencies_hz[1]
-				);
-			goertzel_c =
-				goertzel_sync(
-					VO,
-					ADC_SIZE,
-					ANALYZER_SAMPLE_RATE_HZ,
-					spectrum_frequencies_hz[2]
-				);
-			(void)goertzel_a;
-			(void)goertzel_b;
-			(void)goertzel_c;
-
-			float Vrms=Vpp_R();
-
-			/*
-			 * 在一次真实分析全部完成后发布稳定快照。
-			 * 单位换算、谱峰排序和一个周期显示波形提取均由桥接层完成。
-			 */
-			AnalyzerBridge_PublishReal(
-				adc_b,
-				ADC_SIZE,
-				ADC_VOLTS_PER_CODE,
-				ANALYZER_SAMPLE_RATE_HZ,
-				vpp,
-				Vrms,
-				spectrum_flag,
-				spectrum_frequencies_hz,
-				spectrum_amplitudes_v
+					spectrum_flag,
+					spectrum_frequencies_hz,
+					spectrum_amplitudes_v
 			);
+			float Vrms=Vpp_R();
+			AnalyzerBridge_PublishPreparedReal(vpp, Vrms);
 
 			AdcConvEnd=0;
 			HAL_ADC_Start_DMA(&hadc1,(uint32_t*)adc_b,2048);
+			HAL_ADC_Start_DMA(&hadc2,(uint32_t*)adc_b1,2048);
+			__DSB();
+			HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
 			//AdcConvEnd=0;
 		}
-
-#if BOARD_KEY_CONTROL_ENABLE
+		#if BOARD_KEY_CONTROL_ENABLE
 		BoardKey_Task();
-#endif
+		#endif
 		Display_Task();
-		
   }
   /* USER CODE END 3 */
 }

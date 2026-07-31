@@ -13,7 +13,7 @@
 - `arm_cmplx_mag_f32()`
 - `arm_max_f32()`
 - `arm_rms_f32()`
-- `arm_cfft_sR_f32_len2048`
+- `arm_cfft_sR_f32_len4096`
 
 队友ADC1新快照还增加自有源码：
 
