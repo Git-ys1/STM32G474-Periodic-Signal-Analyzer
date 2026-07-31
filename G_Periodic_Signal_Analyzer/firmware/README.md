@@ -15,7 +15,7 @@
 
 ```powershell
 cd firmware\ADC\MDK-ARM
-& 'D:\Work\Keil5\UV4\UV4.exe' -r 'ADC.uvprojx' -j0 -o 'v23-build.log'
+& 'D:\Work\Keil5\UV4\UV4.exe' -r 'ADC.uvprojx' -j0 -o 'v24-compact-axis-build.log'
 ```
 
 验收：`0 Error(s), 0 Warning(s)`。
@@ -25,5 +25,5 @@ cd firmware\ADC\MDK-ARM
 | 文件 | 作用 |
 |---|---|
 | `Core/Src/main.c` | 队友测量链、KEY1和显示任务集成 |
-| `Core/Src/analyzer_bridge.c` | 真实ADC折叠、Huber和谐波投影 |
-| `Core/Src/display.c` | 淘晶驰协议、曲线、文本和运行状态机 |
+| `Core/Src/analyzer_bridge.c` | 真实ADC折叠、Huber、谐波投影和独立2048点模型Mpp |
+| `Core/Src/display.c` | 512/256曲线、动态坐标、淘晶驰协议和运行状态机 |

@@ -28,6 +28,14 @@ extern "C" {
 #define ANALYZER_DISPLAY_POINT_COUNT  256U
 #define ANALYZER_MAX_COMPONENTS       3U
 
+/*
+ * ADC引脚前的模拟链路总电压增益。真实输入的模型Vpp必须折算回信号源端，
+ * 因此默认除以6；若队友后续重新标定，可在工程宏定义中覆盖本值。
+ */
+#ifndef ANALYZER_FRONTEND_VOLTAGE_GAIN
+#define ANALYZER_FRONTEND_VOLTAGE_GAIN 6.0f
+#endif
+
 typedef enum
 {
     ANALYZER_SOURCE_REAL = 0,
@@ -62,7 +70,9 @@ typedef struct
 
     float fundamental_hz;
     float vpp_mv;
+    float model_vpp_mv;
     float vrms_mv;
+    uint8_t model_vpp_valid;
 
     uint8_t component_count;
     AnalyzerComponent components[ANALYZER_MAX_COMPONENTS];
@@ -83,6 +93,28 @@ typedef struct
  * @brief 初始化统一分析结果桥接层。
  */
 void AnalyzerBridge_Init(void);
+
+/**
+ * @brief 直接用全部ADC样本做Huber谐波模型拟合并计算输入端峰峰值。
+ *
+ * 模型为DC项加FFT已识别整数次谐波的正弦/余弦项。函数先做普通最小二乘，
+ * 再做三轮Huber IRLS；最终在4096个等相位点上合成模型并求最大值减最小值。
+ * 它不读取256槽显示波形，也不修改队友的Vpp、RMS或FFT结果。
+ *
+ * @param frontend_gain ADC引脚电压相对信号源输入的增益；当前真实前端传6.0。
+ * @param model_vpp_mv 返回折算到信号源输入端的模型峰峰值，单位mV。
+ */
+bool AnalyzerBridge_CalculateRobustModelVpp(
+    const uint16_t *adc_codes,
+    uint16_t sample_count,
+    float volts_per_code,
+    float sample_rate_hz,
+    float refined_fundamental_hz,
+    float reported_fundamental_hz,
+    const AnalyzerComponent components[ANALYZER_MAX_COMPONENTS],
+    uint8_t component_count,
+    float frontend_gain,
+    float *model_vpp_mv);
 
 /**
  * @brief 发布一次队友算法已经完成的真实分析结果。

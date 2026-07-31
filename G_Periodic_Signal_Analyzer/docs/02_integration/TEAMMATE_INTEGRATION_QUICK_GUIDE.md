@@ -1,4 +1,4 @@
-# V2.2 队友工程融合速查
+# V2.4.0队友工程融合速查
 
 适用底座：队友完整 CubeMX/Keil 工程，当前仓库参考快照为
 `teammate/current`。
@@ -10,6 +10,8 @@
 - 只叠加 `analyzer_bridge.c/.h`、`display.c/.h`，不要互相覆盖整份
   `main.c`；
 - V2.2 没有改变 `AnalyzerBridge_PublishReal()` 接口，旧融合插入点不变；
+- V2.4实验模型Vpp仍未改变发布接口，也不要求队友改`main.c`；它完全封装在
+  `analyzer_bridge.c/.h`并由`display.c`写入独立文本`t_vpp2`；
 - V2.2 的 Huber 模式已升级为“两遍 Huber + FFT 已识别整数谐波投影”，
   只平滑显示波形，不改变队友测得的频率、Vpp、RMS 和谱线；
 - 发给队友的生产包关闭随机测试，上电默认 Huber；
@@ -309,10 +311,33 @@ Clean Rebuild：0 errors、0 warnings
 → dashboard上报两条动态曲线ID
 → KEY1短按：1T/3T切换
 → KEY1长按：立即刷新真实ADC，不进入随机测试
-→ 检查时域、频谱和六项文本
+→ 检查512点时域、256点频谱、动态坐标和测量文本
 → 检查FE/FD透传且无0x12/0x1A/0x24
 → 检查CFSR/HFSR均为0
 ```
 
 若屏幕无图，先查 CPU Fault、USART3、动态曲线 ID 和
 `AnalyzerBridge_PublishReal()` 的发布序号，不要先重写显示协议。
+
+## 12. V2.4模型Vpp怎么接
+
+V2.4尚待实屏三方对照，当前不要删除或替换队友`Vpp_Robust()`。需要试用时：
+
+1. 成对复制最新`analyzer_bridge.c/.h`，再复制最新`display.c`；
+2. 保留原来的`AnalyzerBridge_PublishReal()`调用，参数和插入点不变；
+3. 按[`HMI_COMPACT_LAYOUT_DRAFT.md`](../01_architecture/HMI_COMPACT_LAYOUT_DRAFT.md)
+   增加`t_vpp2`、动态坐标、512点时域、
+   256点频谱和`sw_period`；
+4. 确认队友`Upp`的最新前端增益宏只除以6一次；桥接`Mpp`内部已经按
+   `ANALYZER_FRONTEND_VOLTAGE_GAIN=6.0f`折算，不能在外面再除一次；
+5. 同屏记录信号源/示波器Vpp、`Upp`和`Mpp`，验证通过后再决定是否替换口径。
+
+真正独立的计算入口是：
+
+```c
+AnalyzerBridge_CalculateRobustModelVpp(...);
+```
+
+正常融合无需在`main.c`直接调用它；`AnalyzerBridge_BuildRealWaveform()`会在桥接
+内部自动计算并写入`AnalyzerResult.model_vpp_mv`。若前端重新标定，只覆盖
+`ANALYZER_FRONTEND_VOLTAGE_GAIN`宏，不要改队友采集或FFT流程。

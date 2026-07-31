@@ -17,12 +17,14 @@
 #define TJC_HUBER_MODE_CODE          0x08U
 
 /* dashboard页面内两块曲线控件的固定显示尺寸。 */
-#define DISPLAY_CURVE_WIDTH          794U
-#define DISPLAY_CURVE_HEIGHT         145U
+#define DISPLAY_TIME_CURVE_WIDTH     512U
+#define DISPLAY_SPEC_CURVE_WIDTH     256U
+#define DISPLAY_CURVE_BUFFER_WIDTH   DISPLAY_TIME_CURVE_WIDTH
+#define DISPLAY_CURVE_HEIGHT         256U
 #define DISPLAY_CURVE_Y_MAX          (DISPLAY_CURVE_HEIGHT - 1U)
-#define DISPLAY_TIME_MARGIN          5U
-#define DISPLAY_SPEC_MARGIN          3U
-#define DISPLAY_SPEC_X_MARGIN        32U
+#define DISPLAY_TIME_MARGIN          0U
+#define DISPLAY_SPEC_MARGIN          0U
+#define DISPLAY_SPEC_X_MARGIN        0U
 #define DISPLAY_SPECTRUM_MAX_HZ      500000.0f
 #define DISPLAY_REFRESH_INTERVAL_MS  3000U
 #define DISPLAY_TRIGGER_HYST_RATIO   0.02f
@@ -62,6 +64,7 @@ static volatile DisplayTriggerMode s_trigger_mode =
     DISPLAY_TRIGGER_RISING_ZERO;
 static volatile uint8_t s_requested_huber_enabled = 1U;
 static volatile bool s_huber_mode_update_pending = false;
+static volatile bool s_period_switch_sync_pending = false;
 static volatile UI_Action s_pending_action = UI_ACTION_NONE;
 static volatile DisplayRunMode s_run_mode = DISPLAY_RUN_STOPPED;
 static uint32_t s_next_refresh_tick = 0U;
@@ -84,7 +87,7 @@ static uint8_t s_status_frame_index = 0U;
 static volatile uint8_t s_last_hmi_status = 0U;
 static uint8_t s_rx_it_byte = 0U;
 
-static uint8_t s_curve_buffer[DISPLAY_CURVE_WIDTH];
+static uint8_t s_curve_buffer[DISPLAY_CURVE_BUFFER_WIDTH];
 
 /**
  * @brief 向淘晶驰屏发送字符串指令，并自动追加三个0xFF。
@@ -139,6 +142,36 @@ static HAL_StatusTypeDef TJC_SetText(const char *object_name,
         "%s.txt=\"%s\"",
         object_name,
         text
+    );
+
+    if ((length <= 0) || ((size_t)length >= sizeof(command)))
+    {
+        return HAL_ERROR;
+    }
+
+    return TJC_SendCommand(command);
+}
+
+/**
+ * @brief 修改数字、虚拟浮点或状态开关控件的val属性。
+ */
+static HAL_StatusTypeDef TJC_SetValue(const char *object_name,
+                                      int32_t value)
+{
+    char command[48];
+    int length;
+
+    if (object_name == NULL)
+    {
+        return HAL_ERROR;
+    }
+
+    length = snprintf(
+        command,
+        sizeof(command),
+        "%s.val=%ld",
+        object_name,
+        (long)value
     );
 
     if ((length <= 0) || ((size_t)length >= sizeof(command)))
@@ -229,7 +262,7 @@ static HAL_StatusTypeDef TJC_SendCurve(uint8_t curve_id,
 
     if ((data == NULL) ||
         (point_count == 0U) ||
-        (point_count > DISPLAY_CURVE_WIDTH))
+        (point_count > DISPLAY_CURVE_BUFFER_WIDTH))
     {
         return HAL_ERROR;
     }
@@ -344,12 +377,83 @@ static uint32_t Display_ToUnsignedFixed(float value,
 }
 
 /**
+ * @brief 把有符号mV数值格式化为一位小数，避免启用浮点printf。
+ */
+static void Display_FormatSignedTick(char *text,
+                                     size_t text_size,
+                                     float value)
+{
+    int32_t value_x10;
+    uint32_t absolute_x10;
+
+    if ((text == NULL) || (text_size == 0U))
+    {
+        return;
+    }
+
+    value_x10 = (value >= 0.0f)
+        ? (int32_t)(value * 10.0f + 0.5f)
+        : (int32_t)(value * 10.0f - 0.5f);
+
+    if (value_x10 < 0)
+    {
+        absolute_x10 = (uint32_t)(-value_x10);
+        (void)snprintf(
+            text,
+            text_size,
+            "-%lu.%01lu",
+            (unsigned long)(absolute_x10 / 10U),
+            (unsigned long)(absolute_x10 % 10U)
+        );
+    }
+    else
+    {
+        absolute_x10 = (uint32_t)value_x10;
+        (void)snprintf(
+            text,
+            text_size,
+            "%lu.%01lu",
+            (unsigned long)(absolute_x10 / 10U),
+            (unsigned long)(absolute_x10 % 10U)
+        );
+    }
+}
+
+/**
+ * @brief 清空动态坐标文字；频谱横轴0~500 kHz由HMI固定显示。
+ */
+static void Display_ClearAxisLabels(void)
+{
+    uint8_t i;
+    static const char *time_y_names[5] =
+    {
+        "n_ty4", "n_ty3", "n_ty2", "n_ty1", "n_ty0"
+    };
+    static const char *spectrum_y_names[5] =
+    {
+        "n_sy4", "n_sy3", "n_sy2", "n_sy1", "n_sy0"
+    };
+    static const char *time_x_names[5] =
+    {
+        "x_tx0", "x_tx1", "x_tx2", "x_tx3", "x_tx4"
+    };
+
+    for (i = 0U; i < 5U; ++i)
+    {
+        (void)TJC_SetText(time_y_names[i], "---");
+        (void)TJC_SetText(spectrum_y_names[i], "---");
+        (void)TJC_SetValue(time_x_names[i], 0);
+    }
+}
+
+/**
  * @brief 更新dashboard的峰峰值、真有效值、基频和最多三个谱峰。
  */
 static void Display_UpdateResultTexts(const AnalyzerResult *result)
 {
     char text[64];
     uint32_t vpp_x10;
+    uint32_t model_vpp_x10;
     uint32_t rms_x100;
     uint32_t fundamental_khz_x10;
     uint8_t i;
@@ -368,6 +472,8 @@ static void Display_UpdateResultTexts(const AnalyzerResult *result)
     }
 
     vpp_x10 = Display_ToUnsignedFixed(result->vpp_mv, 10U);
+    model_vpp_x10 =
+        Display_ToUnsignedFixed(result->model_vpp_mv, 10U);
     rms_x100 = Display_ToUnsignedFixed(result->vrms_mv, 100U);
     fundamental_khz_x10 =
         Display_ToUnsignedFixed(
@@ -383,6 +489,22 @@ static void Display_UpdateResultTexts(const AnalyzerResult *result)
         (unsigned long)(vpp_x10 % 10U)
     );
     (void)TJC_SetText("t_vpp", text);
+
+    if (result->model_vpp_valid != 0U)
+    {
+        (void)snprintf(
+            text,
+            sizeof(text),
+            "Mpp: %lu.%01lu mV",
+            (unsigned long)(model_vpp_x10 / 10U),
+            (unsigned long)(model_vpp_x10 % 10U)
+        );
+    }
+    else
+    {
+        (void)snprintf(text, sizeof(text), "Mpp: --.- mV");
+    }
+    (void)TJC_SetText("t_vpp2", text);
 
     (void)snprintf(
         text,
@@ -465,11 +587,12 @@ static void Display_UpdateResultTexts(const AnalyzerResult *result)
 }
 
 /**
- * @brief 将六项测量文本恢复为无数据占位符。
+ * @brief 将测量文本恢复为无数据占位符。
  */
 static void Display_ClearResultTexts(void)
 {
     (void)TJC_SetText("t_vpp", "Upp: --.- mV");
+    (void)TJC_SetText("t_vpp2", "Mpp: --.- mV");
     (void)TJC_SetText("t_rms", "Urms: --.-- mV");
     (void)TJC_SetText("t_freq", "f1: --.- kHz");
     (void)TJC_SetText("t_c1", "基波: --.- kHz / --.- mVpk");
@@ -500,6 +623,7 @@ static HAL_StatusTypeDef Display_ClearDashboard(void)
     }
 
     Display_ClearResultTexts();
+    Display_ClearAxisLabels();
 
     if (time_status != HAL_OK)
     {
@@ -545,16 +669,49 @@ static void Display_ShowSpectrumError(HAL_StatusTypeDef hal_status)
 }
 
 /**
- * @brief 根据波形最大绝对值自动选择对称时域显示满量程。
+ * @brief 把真实ADC相位折叠波形折算回信号源输入端。
+ */
+static float Display_GetWaveformInputScale(
+    const AnalyzerResult *result)
+{
+    if ((result != NULL) &&
+        (result->source == ANALYZER_SOURCE_REAL) &&
+        (ANALYZER_FRONTEND_VOLTAGE_GAIN > 0.0f))
+    {
+        return 1.0f / ANALYZER_FRONTEND_VOLTAGE_GAIN;
+    }
+
+    return 1.0f;
+}
+
+/**
+ * @brief 用独立Mpp模型确定时域对称满量程；无Mpp时才回退到波形峰值。
  */
 static float Display_GetTimeFullScale(const AnalyzerResult *result)
 {
     float maximum_absolute = 0.0f;
+    float input_scale;
     uint16_t i;
+
+    if ((result->model_vpp_valid != 0U) &&
+        (result->model_vpp_mv > 0.0f))
+    {
+        maximum_absolute = result->model_vpp_mv * 0.5f;
+
+        if (maximum_absolute < 1.0f)
+        {
+            maximum_absolute = 1.0f;
+        }
+
+        return maximum_absolute;
+    }
+
+    input_scale = Display_GetWaveformInputScale(result);
 
     for (i = 0U; i < result->waveform_count; ++i)
     {
-        float value = fabsf(result->waveform_mv[i]);
+        float value =
+            fabsf(result->waveform_mv[i] * input_scale);
         if (value > maximum_absolute)
         {
             maximum_absolute = value;
@@ -567,6 +724,106 @@ static float Display_GetTimeFullScale(const AnalyzerResult *result)
     }
 
     return maximum_absolute * 1.10f;
+}
+
+/**
+ * @brief 使用队友FFT分量中的最大幅度确定频谱纵轴满量程。
+ */
+static float Display_GetSpectrumFullScale(
+    const AnalyzerResult *result)
+{
+    float full_scale_mv = 1.0f;
+    uint8_t component;
+
+    for (component = 0U;
+         component < result->component_count;
+         ++component)
+    {
+        if (result->components[component].amplitude_mv >
+            full_scale_mv)
+        {
+            full_scale_mv =
+                result->components[component].amplitude_mv;
+        }
+    }
+
+    return full_scale_mv * 1.15f;
+}
+
+/**
+ * @brief 写入时域实际mV纵轴和0~显示时长的us横轴。
+ */
+static void Display_UpdateTimeAxes(const AnalyzerResult *result,
+                                   uint8_t periods,
+                                   float full_scale_mv)
+{
+    char text[16];
+    float duration_us = 0.0f;
+    uint8_t i;
+    static const char *time_y_names[5] =
+    {
+        "n_ty4", "n_ty3", "n_ty2", "n_ty1", "n_ty0"
+    };
+    static const char *time_x_names[5] =
+    {
+        "x_tx0", "x_tx1", "x_tx2", "x_tx3", "x_tx4"
+    };
+
+    for (i = 0U; i < 5U; ++i)
+    {
+        float y_value =
+            full_scale_mv * (1.0f - 0.5f * (float)i);
+
+        Display_FormatSignedTick(text, sizeof(text), y_value);
+        (void)TJC_SetText(time_y_names[i], text);
+    }
+
+    if (result->fundamental_hz > 0.0f)
+    {
+        duration_us =
+            (float)periods * 1000000.0f /
+            result->fundamental_hz;
+    }
+
+    for (i = 0U; i < 5U; ++i)
+    {
+        uint32_t value_x10 = Display_ToUnsignedFixed(
+            duration_us * (float)i / 4.0f,
+            10U
+        );
+
+        if (value_x10 > 2147483647UL)
+        {
+            value_x10 = 2147483647UL;
+        }
+
+        (void)TJC_SetValue(
+            time_x_names[i],
+            (int32_t)value_x10
+        );
+    }
+}
+
+/**
+ * @brief 写入频谱0~满量程的实际mV纵轴。
+ */
+static void Display_UpdateSpectrumAxis(float full_scale_mv)
+{
+    char text[16];
+    uint8_t i;
+    static const char *spectrum_y_names[5] =
+    {
+        "n_sy4", "n_sy3", "n_sy2", "n_sy1", "n_sy0"
+    };
+
+    for (i = 0U; i < 5U; ++i)
+    {
+        float y_value =
+            full_scale_mv * (1.0f - 0.25f * (float)i);
+
+        Display_FormatSignedTick(text, sizeof(text), y_value);
+        (void)TJC_SetText(spectrum_y_names[i], text);
+    }
 }
 
 /**
@@ -941,6 +1198,7 @@ static HAL_StatusTypeDef Display_DrawTimeResult(
     uint8_t periods)
 {
     float full_scale_mv;
+    float input_scale;
     float trigger_position;
     uint16_t i;
     HAL_StatusTypeDef status;
@@ -957,9 +1215,11 @@ static HAL_StatusTypeDef Display_DrawTimeResult(
     }
 
     full_scale_mv = Display_GetTimeFullScale(result);
+    input_scale = Display_GetWaveformInputScale(result);
     trigger_position = Display_GetTriggerPosition(result);
+    Display_UpdateTimeAxes(result, periods, full_scale_mv);
 
-    for (i = 0U; i < DISPLAY_CURVE_WIDTH; ++i)
+    for (i = 0U; i < DISPLAY_TIME_CURVE_WIDTH; ++i)
     {
         float source_position =
             Display_WrapWaveformPosition(
@@ -967,7 +1227,7 @@ static HAL_StatusTypeDef Display_DrawTimeResult(
                 ((float)i *
                  (float)periods *
                  (float)result->waveform_count) /
-                (float)(DISPLAY_CURVE_WIDTH - 1U),
+                (float)(DISPLAY_TIME_CURVE_WIDTH - 1U),
                 result->waveform_count
             );
         uint32_t integer_position =
@@ -986,10 +1246,11 @@ static HAL_StatusTypeDef Display_DrawTimeResult(
                 result->waveform_count
             );
         float sample_mv =
-            result->waveform_mv[index0] +
-            fraction *
-            (result->waveform_mv[index1] -
-             result->waveform_mv[index0]);
+            (result->waveform_mv[index0] +
+             fraction *
+             (result->waveform_mv[index1] -
+              result->waveform_mv[index0])) *
+            input_scale;
 
         /*
          * 淘晶驰addt整帧写入方向与逻辑横坐标相反。频谱路径已经
@@ -997,7 +1258,7 @@ static HAL_StatusTypeDef Display_DrawTimeResult(
          * x -> 1-x 的左右镜像。这里只反转横轴，不改变电压纵轴。
          */
         s_curve_buffer[
-            (DISPLAY_CURVE_WIDTH - 1U) - i
+            (DISPLAY_TIME_CURVE_WIDTH - 1U) - i
         ] = Display_MapToByte(
             sample_mv,
             -full_scale_mv,
@@ -1021,7 +1282,7 @@ static HAL_StatusTypeDef Display_DrawTimeResult(
         s_dashboard.time_curve_id,
         TJC_CURVE_CHANNEL,
         s_curve_buffer,
-        DISPLAY_CURVE_WIDTH
+        DISPLAY_TIME_CURVE_WIDTH
     );
 }
 
@@ -1029,13 +1290,13 @@ static HAL_StatusTypeDef Display_DrawTimeResult(
  * @brief 直接使用统一结果中的频率/峰值分量绘制定性频谱。
  *
  * 不再执行显示侧DFT：真实模式使用队友FFT输出，测试模式使用
- * 场景表中的最终分量。频率轴固定为0~500 kHz，并在左右各保留
- * DISPLAY_SPEC_X_MARGIN个像素，避免0 Hz或500 kHz谱线贴住边框。
+ * 场景表中的最终分量。频率轴固定为0~500 kHz，使用完整256像素宽度，
+ * 使0 Hz和500 kHz分别与左右端刻度严格对应。
  */
 static HAL_StatusTypeDef Display_DrawSpectrumResult(
     const AnalyzerResult *result)
 {
-    float full_scale_mv = 1.0f;
+    float full_scale_mv;
     uint16_t i;
     uint8_t component;
     HAL_StatusTypeDef status;
@@ -1047,24 +1308,13 @@ static HAL_StatusTypeDef Display_DrawSpectrumResult(
         return HAL_ERROR;
     }
 
-    for (i = 0U; i < DISPLAY_CURVE_WIDTH; ++i)
+    full_scale_mv = Display_GetSpectrumFullScale(result);
+    Display_UpdateSpectrumAxis(full_scale_mv);
+
+    for (i = 0U; i < DISPLAY_SPEC_CURVE_WIDTH; ++i)
     {
         s_curve_buffer[i] = DISPLAY_SPEC_MARGIN;
     }
-
-    for (component = 0U;
-         component < result->component_count;
-         ++component)
-    {
-        if (result->components[component].amplitude_mv >
-            full_scale_mv)
-        {
-            full_scale_mv =
-                result->components[component].amplitude_mv;
-        }
-    }
-
-    full_scale_mv *= 1.15f;
 
     for (component = 0U;
          component < result->component_count;
@@ -1087,24 +1337,24 @@ static HAL_StatusTypeDef Display_DrawSpectrumResult(
                 frequency_hz /
                 DISPLAY_SPECTRUM_MAX_HZ *
                 (float)(
-                    DISPLAY_CURVE_WIDTH -
+                    DISPLAY_SPEC_CURVE_WIDTH -
                     1U -
                     2U * DISPLAY_SPEC_X_MARGIN
                 ) +
                 0.5f
             );
 
-        if (calculated_position >= DISPLAY_CURVE_WIDTH)
+        if (calculated_position >= DISPLAY_SPEC_CURVE_WIDTH)
         {
             calculated_position =
-                DISPLAY_CURVE_WIDTH - 1U;
+                DISPLAY_SPEC_CURVE_WIDTH - 1U;
         }
 
         /*
          * 保留V1.3.1已验证方向：淘晶驰整帧写入方向与数组索引相反。
          */
         buffer_position =
-            (DISPLAY_CURVE_WIDTH - 1U) -
+            (DISPLAY_SPEC_CURVE_WIDTH - 1U) -
             calculated_position;
 
         s_curve_buffer[buffer_position] =
@@ -1131,7 +1381,7 @@ static HAL_StatusTypeDef Display_DrawSpectrumResult(
         s_dashboard.spectrum_curve_id,
         TJC_CURVE_CHANNEL,
         s_curve_buffer,
-        DISPLAY_CURVE_WIDTH
+        DISPLAY_SPEC_CURVE_WIDTH
     );
 }
 
@@ -1180,6 +1430,7 @@ static void Display_ProcessButtonCommand(uint8_t command)
     if (command == 0x01U)
     {
         s_visible_periods = 1U;
+        s_period_switch_sync_pending = true;
         s_pending_action =
             (s_dashboard.valid &&
              (s_run_mode != DISPLAY_RUN_STOPPED))
@@ -1196,6 +1447,7 @@ static void Display_ProcessButtonCommand(uint8_t command)
     else if (command == 0x03U)
     {
         s_visible_periods = 3U;
+        s_period_switch_sync_pending = true;
         s_pending_action =
             (s_dashboard.valid &&
              (s_run_mode != DISPLAY_RUN_STOPPED))
@@ -1247,6 +1499,7 @@ static void TJC_ProcessCustomFrame(const uint8_t *frame,
         s_dashboard.time_curve_id = frame[3];
         s_dashboard.spectrum_curve_id = frame[4];
         s_dashboard.valid = true;
+        s_period_switch_sync_pending = true;
         s_pending_action =
             (s_run_mode == DISPLAY_RUN_STOPPED)
             ? UI_ACTION_NONE
@@ -1452,6 +1705,7 @@ void Display_Init(UART_HandleTypeDef *huart)
     s_trigger_mode = DISPLAY_TRIGGER_RISING_ZERO;
     s_requested_huber_enabled = 1U;
     s_huber_mode_update_pending = false;
+    s_period_switch_sync_pending = false;
     s_pending_action = UI_ACTION_NONE;
     s_run_mode = DISPLAY_RUN_STOPPED;
     s_next_refresh_tick = 0U;
@@ -1578,6 +1832,26 @@ void Display_Task(void)
                 (s_visible_periods == 3U)
                 ? UI_ACTION_DRAW_TIME_3
                 : UI_ACTION_DRAW_TIME_1;
+        }
+    }
+
+    /*
+     * KEY1也能改变1T/3T，但不可触摸屏不会自行更新开关外观。
+     * UART中断只登记同步请求，主循环在dashboard就绪后回写sw_period。
+     */
+    if (s_period_switch_sync_pending && s_dashboard.valid)
+    {
+        uint8_t periods_to_sync = s_visible_periods;
+
+        s_period_switch_sync_pending = false;
+        (void)TJC_SetValue(
+            "sw_period",
+            (periods_to_sync == 3U) ? 1 : 0
+        );
+
+        if (s_visible_periods != periods_to_sync)
+        {
+            s_period_switch_sync_pending = true;
         }
     }
 

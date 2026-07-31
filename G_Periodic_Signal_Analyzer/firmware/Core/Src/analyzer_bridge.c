@@ -16,6 +16,10 @@
 #define ANALYZER_HUBER_SCALE_FACTOR         1.4826f
 #define ANALYZER_HUBER_MINIMUM_DELTA_LSB    1.5f
 #define ANALYZER_HARMONIC_RATIO_TOLERANCE   0.15f
+#define ANALYZER_MODEL_MAX_COEFFICIENTS      (1U + 2U * ANALYZER_MAX_COMPONENTS)
+#define ANALYZER_MODEL_IRLS_PASSES           3U
+#define ANALYZER_MODEL_SYNTHESIS_POINTS      4096U
+#define ANALYZER_MODEL_SOLVER_EPSILON        0.00001f
 
 #if ANALYZER_TEST_ENABLE
 #include "generated_adc_tests.h"
@@ -63,6 +67,20 @@ static float s_frequency_scores[ANALYZER_FREQ_SEARCH_COUNT];
  * 立即重建，而不是等待下一帧或拿不同测试组做视觉比较。
  */
 static float s_huber_workspace[ANALYZER_MAX_SAMPLE_COUNT];
+/*
+ * 2048点Huber谐波拟合的最大正规方程仅为7x8，但若作为局部变量会占用
+ * 约300字节主栈。启动文件只给主栈1 KB，故与其它大工作区一样放到
+ * 模块静态区；桥接模块按单线程顺序调用，不存在重入冲突。
+ */
+static float s_model_coefficients[ANALYZER_MODEL_MAX_COEFFICIENTS];
+static float s_model_normal_matrix[ANALYZER_MODEL_MAX_COEFFICIENTS]
+                                  [ANALYZER_MODEL_MAX_COEFFICIENTS + 1U];
+static float s_model_design_row[ANALYZER_MODEL_MAX_COEFFICIENTS];
+static uint8_t s_model_harmonic_orders[ANALYZER_MAX_COMPONENTS];
+static float s_model_step_real[ANALYZER_MAX_COMPONENTS];
+static float s_model_step_imag[ANALYZER_MAX_COMPONENTS];
+static float s_model_oscillator_real[ANALYZER_MAX_COMPONENTS];
+static float s_model_oscillator_imag[ANALYZER_MAX_COMPONENTS];
 static uint16_t s_latest_real_adc[ANALYZER_MAX_SAMPLE_COUNT];
 static uint16_t s_latest_real_sample_count = 0U;
 static float s_latest_real_volts_per_code = 0.0f;
@@ -798,6 +816,526 @@ static bool AnalyzerBridge_ApplySelectedHarmonicProjection(
     return true;
 }
 
+bool AnalyzerBridge_CalculateRobustModelVpp(
+    const uint16_t *adc_codes,
+    uint16_t sample_count,
+    float volts_per_code,
+    float sample_rate_hz,
+    float refined_fundamental_hz,
+    float reported_fundamental_hz,
+    const AnalyzerComponent components[ANALYZER_MAX_COMPONENTS],
+    uint8_t component_count,
+    float frontend_gain,
+    float *model_vpp_mv)
+{
+    uint8_t harmonic_count = 1U;
+    uint8_t coefficient_count;
+    float mean_code = 0.0f;
+    float sample_scale_mv;
+    float residual_center = 0.0f;
+    float delta_mv = 0.0f;
+    float model_min_mv = 1.0e30f;
+    float model_max_mv = -1.0e30f;
+    uint16_t sample;
+    uint16_t phase_index;
+    uint8_t component;
+    uint8_t harmonic;
+    uint8_t iteration;
+    uint8_t row;
+    uint8_t column;
+
+    if ((adc_codes == NULL) ||
+        (components == NULL) ||
+        (model_vpp_mv == NULL) ||
+        (sample_count < 2U) ||
+        (sample_count > ANALYZER_MAX_SAMPLE_COUNT) ||
+        (volts_per_code <= 0.0f) ||
+        (sample_rate_hz <= 0.0f) ||
+        (refined_fundamental_hz <= 0.0f) ||
+        (reported_fundamental_hz <= 0.0f) ||
+        (component_count == 0U) ||
+        (frontend_gain <= 0.0f))
+    {
+        return false;
+    }
+
+    *model_vpp_mv = 0.0f;
+    s_model_harmonic_orders[0] = 1U;
+
+    /*
+     * 队友FFT只用于确定允许进入模型的整数谐波次数；幅值和相位均由
+     * 下面对2048个原始ADC样本的拟合重新求解。
+     */
+    for (component = 0U;
+         (component < component_count) &&
+         (component < ANALYZER_MAX_COMPONENTS);
+         ++component)
+    {
+        float ratio =
+            components[component].frequency_hz /
+            reported_fundamental_hz;
+        uint16_t candidate_order =
+            (uint16_t)(ratio + 0.5f);
+        bool duplicate = false;
+
+        if ((candidate_order < 1U) ||
+            (candidate_order >=
+             (ANALYZER_DISPLAY_POINT_COUNT / 2U)) ||
+            (fabsf(ratio - (float)candidate_order) >
+             ANALYZER_HARMONIC_RATIO_TOLERANCE) ||
+            (refined_fundamental_hz *
+             (float)candidate_order >=
+             sample_rate_hz * 0.5f))
+        {
+            continue;
+        }
+
+        for (harmonic = 0U;
+             harmonic < harmonic_count;
+             ++harmonic)
+        {
+            if (s_model_harmonic_orders[harmonic] ==
+                (uint8_t)candidate_order)
+            {
+                duplicate = true;
+                break;
+            }
+        }
+
+        if (!duplicate &&
+            (harmonic_count < ANALYZER_MAX_COMPONENTS))
+        {
+            s_model_harmonic_orders[harmonic_count] =
+                (uint8_t)candidate_order;
+            ++harmonic_count;
+        }
+    }
+
+    coefficient_count =
+        (uint8_t)(1U + 2U * harmonic_count);
+    memset(s_model_coefficients, 0, sizeof(s_model_coefficients));
+
+    for (sample = 0U; sample < sample_count; ++sample)
+    {
+        mean_code += (float)adc_codes[sample];
+    }
+    mean_code /= (float)sample_count;
+    sample_scale_mv =
+        volts_per_code * 1000.0f / frontend_gain;
+
+    for (harmonic = 0U;
+         harmonic < harmonic_count;
+         ++harmonic)
+    {
+        float angle_step =
+            ANALYZER_TWO_PI *
+            (float)s_model_harmonic_orders[harmonic] *
+            refined_fundamental_hz /
+            sample_rate_hz;
+
+        s_model_step_real[harmonic] = cosf(angle_step);
+        s_model_step_imag[harmonic] = sinf(angle_step);
+    }
+
+    /*
+     * 第0轮是全部样本等权最小二乘；随后三轮使用上一轮残差的
+     * median/MAD生成Huber权重。残差中心化只参与权重计算，真正拟合的
+     * 始终是原始2048点ADC电压，而不是残差或256槽波形。
+     */
+    for (iteration = 0U;
+         iteration <= ANALYZER_MODEL_IRLS_PASSES;
+         ++iteration)
+    {
+        memset(s_model_normal_matrix, 0, sizeof(s_model_normal_matrix));
+        for (harmonic = 0U;
+             harmonic < harmonic_count;
+             ++harmonic)
+        {
+            s_model_oscillator_real[harmonic] = 1.0f;
+            s_model_oscillator_imag[harmonic] = 0.0f;
+        }
+
+        for (sample = 0U; sample < sample_count; ++sample)
+        {
+            float sample_mv =
+                ((float)adc_codes[sample] - mean_code) *
+                sample_scale_mv;
+            float sample_weight = 1.0f;
+
+            s_model_design_row[0] = 1.0f;
+            for (harmonic = 0U;
+                 harmonic < harmonic_count;
+                 ++harmonic)
+            {
+                s_model_design_row[1U + 2U * harmonic] =
+                    s_model_oscillator_real[harmonic];
+                s_model_design_row[2U + 2U * harmonic] =
+                    s_model_oscillator_imag[harmonic];
+            }
+
+            if (iteration > 0U)
+            {
+                float predicted_mv = 0.0f;
+                float centered_residual;
+
+                for (row = 0U;
+                     row < coefficient_count;
+                     ++row)
+                {
+                    predicted_mv +=
+                        s_model_coefficients[row] *
+                        s_model_design_row[row];
+                }
+
+                centered_residual =
+                    fabsf(
+                        sample_mv -
+                        predicted_mv -
+                        residual_center
+                    );
+                if (centered_residual > delta_mv)
+                {
+                    sample_weight =
+                        delta_mv / centered_residual;
+                }
+            }
+
+            for (row = 0U;
+                 row < coefficient_count;
+                 ++row)
+            {
+                s_model_normal_matrix[row][coefficient_count] +=
+                    sample_weight *
+                    s_model_design_row[row] *
+                    sample_mv;
+
+                for (column = row;
+                     column < coefficient_count;
+                     ++column)
+                {
+                    s_model_normal_matrix[row][column] +=
+                        sample_weight *
+                        s_model_design_row[row] *
+                        s_model_design_row[column];
+                }
+            }
+
+            for (harmonic = 0U;
+                 harmonic < harmonic_count;
+                 ++harmonic)
+            {
+                float next_real =
+                    s_model_oscillator_real[harmonic] *
+                    s_model_step_real[harmonic] -
+                    s_model_oscillator_imag[harmonic] *
+                    s_model_step_imag[harmonic];
+
+                s_model_oscillator_imag[harmonic] =
+                    s_model_oscillator_real[harmonic] *
+                    s_model_step_imag[harmonic] +
+                    s_model_oscillator_imag[harmonic] *
+                    s_model_step_real[harmonic];
+                s_model_oscillator_real[harmonic] = next_real;
+            }
+        }
+
+        for (row = 0U;
+             row < coefficient_count;
+             ++row)
+        {
+            for (column = 0U;
+                 column < row;
+                 ++column)
+            {
+                s_model_normal_matrix[row][column] =
+                    s_model_normal_matrix[column][row];
+            }
+        }
+
+        /* 带部分主元的Gauss-Jordan，矩阵最大仅7×8。 */
+        for (column = 0U;
+             column < coefficient_count;
+             ++column)
+        {
+            uint8_t pivot_row = column;
+            float pivot_abs =
+                fabsf(s_model_normal_matrix[column][column]);
+
+            for (row = (uint8_t)(column + 1U);
+                 row < coefficient_count;
+                 ++row)
+            {
+                float candidate_abs =
+                    fabsf(s_model_normal_matrix[row][column]);
+
+                if (candidate_abs > pivot_abs)
+                {
+                    pivot_abs = candidate_abs;
+                    pivot_row = row;
+                }
+            }
+
+            if (pivot_abs < ANALYZER_MODEL_SOLVER_EPSILON)
+            {
+                return false;
+            }
+
+            if (pivot_row != column)
+            {
+                uint8_t swap_column;
+
+                for (swap_column = column;
+                     swap_column <= coefficient_count;
+                     ++swap_column)
+                {
+                    float temporary =
+                        s_model_normal_matrix[column][swap_column];
+                    s_model_normal_matrix[column][swap_column] =
+                        s_model_normal_matrix[pivot_row][swap_column];
+                    s_model_normal_matrix[pivot_row][swap_column] =
+                        temporary;
+                }
+            }
+
+            {
+                float pivot = s_model_normal_matrix[column][column];
+                uint8_t normalize_column;
+
+                for (normalize_column = column;
+                     normalize_column <= coefficient_count;
+                     ++normalize_column)
+                {
+                    s_model_normal_matrix[column][normalize_column] /= pivot;
+                }
+            }
+
+            for (row = 0U;
+                 row < coefficient_count;
+                 ++row)
+            {
+                float factor;
+                uint8_t eliminate_column;
+
+                if (row == column)
+                {
+                    continue;
+                }
+
+                factor = s_model_normal_matrix[row][column];
+                for (eliminate_column = column;
+                     eliminate_column <= coefficient_count;
+                     ++eliminate_column)
+                {
+                    s_model_normal_matrix[row][eliminate_column] -=
+                        factor *
+                        s_model_normal_matrix[column][eliminate_column];
+                }
+            }
+        }
+
+        for (row = 0U;
+             row < coefficient_count;
+             ++row)
+        {
+            s_model_coefficients[row] =
+                s_model_normal_matrix[row][coefficient_count];
+        }
+
+        if (iteration == ANALYZER_MODEL_IRLS_PASSES)
+        {
+            break;
+        }
+
+        /* 先求残差中位数，再重新计算绝对偏差的中位数。 */
+        for (harmonic = 0U;
+             harmonic < harmonic_count;
+             ++harmonic)
+        {
+            s_model_oscillator_real[harmonic] = 1.0f;
+            s_model_oscillator_imag[harmonic] = 0.0f;
+        }
+
+        for (sample = 0U; sample < sample_count; ++sample)
+        {
+            float sample_mv =
+                ((float)adc_codes[sample] - mean_code) *
+                sample_scale_mv;
+            float predicted_mv = s_model_coefficients[0];
+
+            for (harmonic = 0U;
+                 harmonic < harmonic_count;
+                 ++harmonic)
+            {
+                predicted_mv +=
+                    s_model_coefficients[1U + 2U * harmonic] *
+                    s_model_oscillator_real[harmonic] +
+                    s_model_coefficients[2U + 2U * harmonic] *
+                    s_model_oscillator_imag[harmonic];
+            }
+            s_huber_workspace[sample] =
+                sample_mv - predicted_mv;
+
+            for (harmonic = 0U;
+                 harmonic < harmonic_count;
+                 ++harmonic)
+            {
+                float next_real =
+                    s_model_oscillator_real[harmonic] *
+                    s_model_step_real[harmonic] -
+                    s_model_oscillator_imag[harmonic] *
+                    s_model_step_imag[harmonic];
+
+                s_model_oscillator_imag[harmonic] =
+                    s_model_oscillator_real[harmonic] *
+                    s_model_step_imag[harmonic] +
+                    s_model_oscillator_imag[harmonic] *
+                    s_model_step_real[harmonic];
+                s_model_oscillator_real[harmonic] = next_real;
+            }
+        }
+
+        residual_center = AnalyzerBridge_Median(
+            s_huber_workspace,
+            sample_count
+        );
+
+        for (harmonic = 0U;
+             harmonic < harmonic_count;
+             ++harmonic)
+        {
+            s_model_oscillator_real[harmonic] = 1.0f;
+            s_model_oscillator_imag[harmonic] = 0.0f;
+        }
+
+        for (sample = 0U; sample < sample_count; ++sample)
+        {
+            float sample_mv =
+                ((float)adc_codes[sample] - mean_code) *
+                sample_scale_mv;
+            float predicted_mv = s_model_coefficients[0];
+
+            for (harmonic = 0U;
+                 harmonic < harmonic_count;
+                 ++harmonic)
+            {
+                predicted_mv +=
+                    s_model_coefficients[1U + 2U * harmonic] *
+                    s_model_oscillator_real[harmonic] +
+                    s_model_coefficients[2U + 2U * harmonic] *
+                    s_model_oscillator_imag[harmonic];
+            }
+            s_huber_workspace[sample] =
+                fabsf(
+                    sample_mv -
+                    predicted_mv -
+                    residual_center
+                );
+
+            for (harmonic = 0U;
+                 harmonic < harmonic_count;
+                 ++harmonic)
+            {
+                float next_real =
+                    s_model_oscillator_real[harmonic] *
+                    s_model_step_real[harmonic] -
+                    s_model_oscillator_imag[harmonic] *
+                    s_model_step_imag[harmonic];
+
+                s_model_oscillator_imag[harmonic] =
+                    s_model_oscillator_real[harmonic] *
+                    s_model_step_imag[harmonic] +
+                    s_model_oscillator_imag[harmonic] *
+                    s_model_step_real[harmonic];
+                s_model_oscillator_real[harmonic] = next_real;
+            }
+        }
+
+        delta_mv =
+            ANALYZER_HUBER_K *
+            ANALYZER_HUBER_SCALE_FACTOR *
+            AnalyzerBridge_Median(
+                s_huber_workspace,
+                sample_count
+            );
+        if (delta_mv <
+            ANALYZER_HUBER_MINIMUM_DELTA_LSB *
+            sample_scale_mv)
+        {
+            delta_mv =
+                ANALYZER_HUBER_MINIMUM_DELTA_LSB *
+                sample_scale_mv;
+        }
+    }
+
+    /*
+     * 拟合使用全部2048个时间样本；Vpp在4096个等相位模型点上求取，
+     * 避免真实峰值恰好落在256槽之间。
+     */
+    for (harmonic = 0U;
+         harmonic < harmonic_count;
+         ++harmonic)
+    {
+        float phase_step =
+            ANALYZER_TWO_PI *
+            (float)s_model_harmonic_orders[harmonic] /
+            (float)ANALYZER_MODEL_SYNTHESIS_POINTS;
+
+        s_model_step_real[harmonic] = cosf(phase_step);
+        s_model_step_imag[harmonic] = sinf(phase_step);
+        s_model_oscillator_real[harmonic] = 1.0f;
+        s_model_oscillator_imag[harmonic] = 0.0f;
+    }
+
+    for (phase_index = 0U;
+         phase_index < ANALYZER_MODEL_SYNTHESIS_POINTS;
+         ++phase_index)
+    {
+        float model_mv = s_model_coefficients[0];
+
+        for (harmonic = 0U;
+             harmonic < harmonic_count;
+             ++harmonic)
+        {
+            float next_real;
+
+            model_mv +=
+                s_model_coefficients[1U + 2U * harmonic] *
+                s_model_oscillator_real[harmonic] +
+                s_model_coefficients[2U + 2U * harmonic] *
+                s_model_oscillator_imag[harmonic];
+
+            next_real =
+                s_model_oscillator_real[harmonic] *
+                s_model_step_real[harmonic] -
+                s_model_oscillator_imag[harmonic] *
+                s_model_step_imag[harmonic];
+            s_model_oscillator_imag[harmonic] =
+                s_model_oscillator_real[harmonic] *
+                s_model_step_imag[harmonic] +
+                s_model_oscillator_imag[harmonic] *
+                s_model_step_real[harmonic];
+            s_model_oscillator_real[harmonic] = next_real;
+        }
+
+        if (model_mv < model_min_mv)
+        {
+            model_min_mv = model_mv;
+        }
+        if (model_mv > model_max_mv)
+        {
+            model_max_mv = model_mv;
+        }
+    }
+
+    if (model_max_mv <= model_min_mv)
+    {
+        return false;
+    }
+
+    *model_vpp_mv = model_max_mv - model_min_mv;
+    return true;
+}
+
 static bool AnalyzerBridge_BuildRealWaveform(
     AnalyzerResult *result,
     const uint16_t *adc_codes,
@@ -855,6 +1393,33 @@ static bool AnalyzerBridge_BuildRealWaveform(
         (samples_per_period > (float)sample_count))
     {
         return false;
+    }
+
+    /*
+     * 新Vpp与256槽显示链路相互独立：直接使用全部原始ADC点和同一个
+     * 细化基频拟合。真实前端折算回输入端时除以6；内部测试数组未经过
+     * 实物放大链路，因此保持1倍，便于继续用理想测试值验证算法。
+     */
+    result->model_vpp_valid =
+        AnalyzerBridge_CalculateRobustModelVpp(
+            adc_codes,
+            sample_count,
+            volts_per_code,
+            sample_rate_hz,
+            fold_frequency_hz,
+            result->fundamental_hz,
+            result->components,
+            result->component_count,
+            (result->source == ANALYZER_SOURCE_REAL)
+                ? ANALYZER_FRONTEND_VOLTAGE_GAIN
+                : 1.0f,
+            &result->model_vpp_mv
+        )
+        ? 1U
+        : 0U;
+    if (result->model_vpp_valid == 0U)
+    {
+        result->model_vpp_mv = 0.0f;
     }
 
     memset(s_phase_sum_mv, 0, sizeof(s_phase_sum_mv));

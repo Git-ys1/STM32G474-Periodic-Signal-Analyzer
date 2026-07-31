@@ -11,8 +11,8 @@
 仓库：F:\Project\stm32G474VETx\TI
 项目：F:\Project\stm32G474VETx\TI\G_Periodic_Signal_Analyzer
 工程：firmware
-发布：v2.1.0（基于v1.9.0 / 9b023b5）
-当前工作树：V2.3结构整理；V2.2算法已定版，尚未Git发布
+发布：v2.4.0（融合底座仍为v1.9.0 / 9b023b5）
+当前工作树：V2.4.0紧凑坐标轴与独立模型Mpp已构建发布，等待配套HMI和实屏三方对照
 ```
 
 V2.1.0普通/Huber折叠已发布：固件已零警告构建并烧录，板上
@@ -36,6 +36,13 @@ V2.3已经删除`projects/`层级：只允许在根目录`firmware/`开发；队
 `teammate/`，废弃demo位于`archive/`。目录总览见根`README.md`和
 `docs/04_releases/V2.3_WORKSPACE_REORGANIZATION_2026-07-31.md`。
 
+V2.4.0保留队友`Upp`，在桥接模块内新增独立
+`AnalyzerBridge_CalculateRobustModelVpp()`：直接用全部2048点做DC加已识别
+整数次谐波的3轮Huber IRLS，在4096相位点求峰峰值并按前端增益6折回输入端。
+新值单独显示为`t_vpp2`的`Mpp`。未修改`main.c`和队友Vpp；同时发布
+512×256时域、256×256频谱、动态实际数值坐标和`sw_period`主循环回写。
+合成异常值验证和Keil构建已通过，但尚未烧录，也没有真实三方证据。
+
 ## 二、必须按顺序阅读
 
 1. 根目录`README.md`与`docs/README.md`
@@ -48,7 +55,8 @@ V2.3已经删除`projects/`层级：只允许在根目录`firmware/`开发；队
 8. `docs/06_handoff/08_BUILD_FLASH_AND_VALIDATION_RUNBOOK.md`
 9. `docs/03_validation/REAL_ADC_FIRST_INTEGRATION_REVIEW_2026-07-31.md`
 10. `docs/04_releases/V2.2_REAL_ADC_HARMONIC_PROJECTION_2026-07-31.md`
-11. 当前源码：
+11. `docs/03_validation/MODEL_VPP_2048_VALIDATION_2026-07-31.md`
+12. 当前源码：
 
 ```text
 firmware/Core/Src/main.c
@@ -83,30 +91,33 @@ git -C 'F:\Project\stm32G474VETx\TI' log -n 12 --oneline --decorate
 ```text
 ADC1/PA0 → DMA adc_b[2048] → 队友FFT和幅值计算
 → AnalyzerBridge_PublishReal()
+├─ 全2048点Huber谐波拟合 → 4096点模型Vpp → /6 → t_vpp2
 → 频率细化和256槽相位折叠
 → 默认状态1执行Huber第二遍折叠和已识别整数谐波投影（仅改时域波形）
 → Display_Task()
-→ 794点时域曲线、频谱线和文本
+→ 512点时域曲线、256点频谱线、动态坐标和文本
 → USART3 FE/FD透传 → 淘晶驰dashboard
 ```
 
 ## 五、下一轮第一件事
 
-先在当前已烧录固件上做屏幕A/B：同一稳定真实输入快速切换
-`A5 02 08 00/01 5A`，确认状态1消除斜坡上的细碎峰谷，同时频谱与六项文本
-不变。保存普通/增强Huber录屏；若仍不平滑，同步导出该帧`adc_b[2048]`，用
-`tools/analyze_real_adc_smoothing.py`复现后再判断是FFT分量识别、折叠频率
-还是屏幕映射问题。
-
-随后继续采集同一帧的配对证据，定位真实 ADC 幅值误差：
+先按`docs/01_architecture/HMI_COMPACT_LAYOUT_DRAFT.md`检查用户手工HMI，保存到
+`firmware/HMI/`，然后烧录V2.4.0 HEX。用同一稳定真实输入采集三方证据：
 
 ```text
 信号源设定
 + PA0处示波器Vpp
 + 原始adc_b[2048]
-+ 屏幕Upp/Urms/频谱
++ 屏幕Upp/Mpp/Urms/频谱
 + 当前VDDA与换算参数
 ```
+
+必须确认队友最新增益宏和桥接各自只除以6一次。若`Mpp`与信号源吻合而`Upp`
+不吻合，问题在原Vpp口径；若二者都同方向偏差，先查VDDA、实际前端增益和
+采样链；若仅特定复合波形偏差，保存同帧FFT频率与`adc_b`审计谐波选择。
+
+完成Vpp三方对照后，再补同一稳定输入的普通/增强Huber屏幕A/B录屏；两项测试
+不要用不同ADC帧或不同信号源设定混在一起下结论。
 
 已确认的实际现象是：
 

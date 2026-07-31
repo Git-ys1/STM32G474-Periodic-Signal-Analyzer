@@ -2,7 +2,7 @@
 
 STM32G474VET6 + 淘晶驰 7 英寸串口屏的周期信号测量与显示工程。
 
-当前工作区版本：**V2.3 结构整理版**。
+当前发布版本：**V2.4.0 紧凑坐标轴与独立Mpp版**。
 唯一主线固件位于 [`firmware/`](firmware/README.md)，不要再从历史 demo 或
 队友快照中直接开发。
 
@@ -40,7 +40,7 @@ TIM3 → ADC1/PA0 → DMA adc_b[2048]
 | 查看当前状态 | [`docs/00_overview/CURRENT_STATUS.md`](docs/00_overview/CURRENT_STATUS.md) |
 | 新会话接管 | [`docs/06_handoff/README.md`](docs/06_handoff/README.md) |
 | 队友融合 | [`docs/02_integration/TEAMMATE_INTEGRATION_QUICK_GUIDE.md`](docs/02_integration/TEAMMATE_INTEGRATION_QUICK_GUIDE.md) |
-| 查看V2.2算法 | [`docs/04_releases/V2.2_REAL_ADC_HARMONIC_PROJECTION_2026-07-31.md`](docs/04_releases/V2.2_REAL_ADC_HARMONIC_PROJECTION_2026-07-31.md) |
+| 查看V2.4发布 | [`docs/04_releases/V2.4_COMPACT_AXIS_AND_MODEL_VPP_2026-07-31.md`](docs/04_releases/V2.4_COMPACT_AXIS_AND_MODEL_VPP_2026-07-31.md) |
 
 ## 冻结规则
 
