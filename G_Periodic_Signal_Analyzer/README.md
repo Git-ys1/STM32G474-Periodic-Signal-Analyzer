@@ -2,9 +2,11 @@
 
 STM32G474VET6 + 淘晶驰 7 英寸串口屏的周期信号测量与显示工程。
 
-当前发布版本：**V2.5.0 双ADC 4096点VO直连版**。
+当前发布版本：**V2.6.0 双ADC相位差与公式Vpp融合版**。
 当前基线已经固定为ADC1/PA0与ADC2/PA1各2048点、交错得到4096点，等效
-采样率约2.048193 MS/s。主线已完成编译、烧录和运行验证。
+采样率约2.048193 MS/s。队友最新`win`版本的Goertzel初相差识别已经合入；
+峰峰值由校正后的谐波幅相模型在4096点相位网格上直接求得，旧
+`Vpp_Robust()`运行调用已停用。主线已完成编译、烧录和离线数学验证。
 唯一主线固件位于 [`firmware/`](firmware/README.md)，不要再从历史 demo 或
 队友快照中直接开发。
 
@@ -31,7 +33,9 @@ TIM3 CH4上升/下降沿
 → ADC1/PA0 + ADC2/PA1
 → DMA adc_b[2048] + adc_b1[2048]
 → 队友生成浮点电压VO[4096]，约2.048193 MS/s
-→ 队友 FFT / Vpp / RMS
+→ 队友FFT分量幅值 + Goertzel分量相位
+→ 前级相移校正入口 + 谐波相对初相差
+→ 4096点谐波公式合成 → Upp / 频谱RMS
 → AnalyzerBridge直接消费VO，不再读取原始ADC码
 → Huber + 已识别谐波投影
 → Display_Task
@@ -46,7 +50,7 @@ TIM3 CH4上升/下降沿
 | 查看当前状态 | [`docs/00_overview/CURRENT_STATUS.md`](docs/00_overview/CURRENT_STATUS.md) |
 | 新会话接管 | [`docs/06_handoff/README.md`](docs/06_handoff/README.md) |
 | 队友融合 | [`docs/02_integration/TEAMMATE_INTEGRATION_QUICK_GUIDE.md`](docs/02_integration/TEAMMATE_INTEGRATION_QUICK_GUIDE.md) |
-| 查看V2.5发布 | [`docs/04_releases/V2.5_DUAL_ADC_4096_VO_BRIDGE_2026-08-01.md`](docs/04_releases/V2.5_DUAL_ADC_4096_VO_BRIDGE_2026-08-01.md) |
+| 查看V2.6发布 | [`docs/04_releases/V2.6_PHASE_DIFFERENCE_FORMULA_VPP_2026-08-01.md`](docs/04_releases/V2.6_PHASE_DIFFERENCE_FORMULA_VPP_2026-08-01.md) |
 
 ## 冻结规则
 

@@ -44,24 +44,18 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define IN1_O() HAL_GPIO_WritePin(GPIOB,GPIO_PIN_0,GPIO_PIN_RESET)
-#define IN1_C() HAL_GPIO_WritePin(GPIOB,GPIO_PIN_0,GPIO_PIN_SET)
-#define IN2_O() HAL_GPIO_WritePin(GPIOB,GPIO_PIN_1,GPIO_PIN_RESET)
-#define IN2_C() HAL_GPIO_WritePin(GPIOB,GPIO_PIN_1,GPIO_PIN_SET)
-#define IN3_O() HAL_GPIO_WritePin(GPIOB,GPIO_PIN_2,GPIO_PIN_RESET)
-#define IN3_C() HAL_GPIO_WritePin(GPIOB,GPIO_PIN_2,GPIO_PIN_SET)
-#define IN4_O() HAL_GPIO_WritePin(GPIOC,GPIO_PIN_12,GPIO_PIN_RESET)
-#define IN4_C() HAL_GPIO_WritePin(GPIOC,GPIO_PIN_12,GPIO_PIN_SET)
+
 #define ADC_SIZE 4096
 /* float ר�� */
 #define SWAP_F(a, b)  do { float _t = (a); (a) = (b); (b) = _t; } while (0)
 uint16_t adc_b[ADC_SIZE/2]={0},adc_b1[ADC_SIZE/2]={0};
 __IO uint8_t AdcConvEnd = 0;
-#define ANALYZER_SAMPLE_RATE_HZ  1024090.0f
-#define ADC_VOLTS_PER_CODE       (3.3f / 4096.0f/6.33)
+#define ANALYZER_SAMPLE_RATE_HZ  2048193.0f
 #define BOARD_KEY_CONTROL_ENABLE 1U
 #define BOARD_KEY_DEBOUNCE_MS    30U
 #define BOARD_KEY_LONG_PRESS_MS  1000U
+
+#define PI 3.14159265358979323846f
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -78,6 +72,13 @@ float F,V,FB,VB,VC,FC,TE,Vr=0;
 uint32_t valid_len;
 uint32_t discard_len;
 uint16_t flag=0;
+
+extern const short bw9_lut[];  /* 你的LUT，自己声明 */
+
+static float g_f1, g_a1, g_phi1;
+static float g_f2, g_a2, g_ph2;
+static float g_f3, g_a3, g_ph3;
+static int   g_n;  /* 分量数 1~3 */
 
 #if defined(__ARMCC_VERSION)
 __attribute__((used)) int __ARM_use_no_argv;
@@ -138,6 +139,67 @@ static void BoardKey_Task(void)
 }
 #endif
 
+static float bw9_phase(float f)
+{
+      return 0;
+}
+
+static void set_base(float f1, float a1, float ph_meas1)
+{
+    g_f1 = f1;  g_a1 = a1;  g_phi1 = ph_meas1;
+    g_f2 = g_a2 = g_ph2 = 0;
+    g_f3 = g_a3 = g_ph3 = 0;
+    g_n = 1;
+}
+
+static float add_harmonic(float fk, float ak, float ph_meas)
+{
+    float Phik = ph_meas  - bw9_phase(fk);
+    float Phi1 = g_phi1   - bw9_phase(g_f1);
+    int   mk   = (int)(fk / g_f1 + 0.5f);
+    float phi  = Phik - mk * Phi1 - (mk - 1) * (PI / 2);
+    phi = atan2f(sinf(phi), cosf(phi));  /* norm */
+
+    g_n++;
+    if (g_n == 2) { g_f2 = fk; g_a2 = ak; g_ph2 = phi; }
+    if (g_n == 3) { g_f3 = fk; g_a3 = ak; g_ph3 = phi; }
+    return phi;
+}
+
+static float get_upp(void)
+{
+    float dt = 1.0f / ANALYZER_SAMPLE_RATE_HZ;
+    int   n  = (int)(3.0f / g_f1 / dt);
+    if (n > 2048) n = 2048;
+    float mx = -1e9, mn = 1e9;
+    for (int i = 0; i < n; i++) {
+        float t  = i * dt;
+        float v  = g_a1 * sinf(2*PI*g_f1*t);
+        if (g_n >= 2) v += g_a2 * sinf(2*PI*g_f2*t + g_ph2);
+        if (g_n >= 3) v += g_a3 * sinf(2*PI*g_f3*t + g_ph3);
+        if (v > mx) mx = v;
+        if (v < mn) mn = v;
+    }
+    return mx - mn;
+}
+
+float getup(float f1, float v1,float f2,float v2,float p2,float f3,float v3,float p3) {
+    float mx=0,mi=0,a=0;
+		//if(flag==2) v3=0;
+    for (int i = 0; i < 4096; i++) {
+       if(flag==2)
+				 a=v1*arm_sin_f32(2*PI*i/1000.0)+v2*arm_sin_f32(2*PI*i/1000.0+p2);
+			 else
+				 a=v1*arm_sin_f32(2*PI*f1*i/4096.0)+v2*arm_sin_f32(2*PI*f2*i/4096.0+p2)+v3*arm_sin_f32(2*PI*f3*i/4096.0+p3);
+			 
+			if(a > mx)
+				mx=a;
+			if(a<mi)
+				mi=a;
+					
+    }
+    return mx - mi;
+}
 
 void sof()
 {
@@ -227,7 +289,7 @@ void fft()
 	VC=2.0*sqrtf(sum)/4096.0;
 	
 	
-	if(VC<0.00477 || FC<FB && FC<F)
+	if(VC<0.00477 || (FC<FB && FC<F))
 	{
 		flag=2;FC=1024000;
 	}
@@ -412,20 +474,29 @@ Display_Init(&huart3);
 			float vpp =Vpp_Robust(VO,4096)  ;            /* ���ֵ */
 
 			GoertzelResult r=goertzel_sync(VO,4096,2048193,F),rB=goertzel_sync(VO,4096,2048193,FB),rC=goertzel_sync(VO,4096,2048193,FC);
-			float Vrms=Vpp_R();
 			
-			AnalyzerBridge_PublishReal(
-					adc_b,
-					ADC_SIZE,
-					ADC_VOLTS_PER_CODE,
-					ANALYZER_SAMPLE_RATE_HZ,
-					vpp,
-					Vrms,
-					spectrum_flag,
-					spectrum_frequencies_hz,
-					spectrum_amplitudes_v
-			);
+			
+			set_base(F, V, r.phase);
+			float phi2 = add_harmonic(FB, VB, rB.phase);
+			float phi3;
+			if(flag==3)
+			{phi3 = add_harmonic(FC, VC, rC.phase);}
 
+			AnalyzerBridge_PrepareReal(
+        VO,
+        ADC_SIZE,
+        ANALYZER_SAMPLE_RATE_HZ,
+        spectrum_flag,
+        spectrum_frequencies_hz,
+        spectrum_amplitudes_v
+);
+
+			float Vrms=Vpp_R();
+			vpp=getup(F,V,FB,VB,phi2,FC,VC,phi3);
+			AnalyzerBridge_PublishPreparedReal(vpp, Vr);
+
+			
+			
 			AdcConvEnd=0;
 			HAL_ADC_Start_DMA(&hadc1,(uint32_t*)adc_b,2048);
 			HAL_ADC_Start_DMA(&hadc2,(uint32_t*)adc_b1,2048);

@@ -2,15 +2,16 @@
 
 更新时间：2026-08-01
 
-当前发布：`v2.5.0`
+当前发布：`v2.6.0`
 
 唯一主线：`firmware/`
-队友底座：`teammate/current/`，来源`4096-2`
+队友底座：`teammate/current/`，来源原`teammate/win/`
 
 ## 当前一句话结论
 
 这是STM32G474电赛G题的双ADC融合工程：ADC1/PA0和ADC2/PA1各采2048点，
-交错并换算为约2.048193 MS/s的浮点电压`VO[4096]`；桥接层直接消费VO，
+交错并换算为约2.048193 MS/s的浮点电压`VO[4096]`；队友最新版本已经增加
+Goertzel分量相位和公式Vpp，桥接层继续直接消费VO，
 不再读取原始ADC码或重复换算。V1.x至V2.4的2048点材料是历史证据，不能
 作为当前接口重新融合。
 
@@ -21,11 +22,13 @@ TIM3 CH4双沿
 → ADC1/PA0 + ADC2/PA1
 → adc_b[2048] + adc_b1[2048]
 → VO[4096]浮点电压
-→ 队友4096点FFT / Vpp_Robust / Goertzel
+→ 队友4096点FFT幅值 / Goertzel相位
+→ 去除公共时间原点与前级系统相移
+→ 4096点谐波公式合成Upp（Vpp_Robust运行调用已停用）
 → AnalyzerBridge_PrepareReal(VO,...)
 → 频率细化 / 256槽折叠 / Huber / 谐波投影 / 模型Mpp
 → 队友Vpp_R()
-→ AnalyzerBridge_PublishPreparedReal(vpp,Vrms)
+→ AnalyzerBridge_PublishPreparedReal(Upp,Vr)
 → Display_Task → USART3 → 淘晶驰dashboard
 ```
 
@@ -69,9 +72,10 @@ TIM3 CH4双沿
 ```text
 Arm Compiler 6.7
 0 Error(s), 0 Warning(s)
-Code=79364, RO-data=75996, RW-data=172, ZI-data=116556
-ADC.hex SHA-256=CEFA87F1953CEDE198AE476043E0E169BF66CAD7D808335D8B1743A545DB86C2
+Code=80244, RO-data=78048, RW-data=172, ZI-data=100212
+ADC.hex SHA-256=12550422C8989B88B920995E7D5B5D742B77030F58DC761D79F30B2C5B64C53D
 ```
 
-固件已通过STM32CubeProgrammer下载、校验和复位。后续第一优先级是把同一信号
-同时送入PA0和PA1，保存同帧`VO[4096]`及屏幕/示波器证据。
+固件已通过STM32CubeProgrammer下载、校验和复位。72组离线幅相重构的最大
+峰峰值误差为0.037693 mV。后续第一优先级是完成前级系统复频响扫频标定，并把
+同一信号同时送入PA0和PA1，保存同帧`VO[4096]`及屏幕/示波器证据。

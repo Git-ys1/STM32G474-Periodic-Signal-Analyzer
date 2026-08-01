@@ -1,7 +1,7 @@
 # 版本记录
 
 V1.x至V2.4文档保留各自版本当时的单ADC、2048点和旧接口事实；当前实现以
-V2.5的双ADC、`VO[4096]`和两阶段桥接接口为准。
+V2.6的双ADC、`VO[4096]`、分量初相差和公式Vpp链为准。
 
 | 文件 | 版本或主题 |
 |---|---|
@@ -21,3 +21,4 @@ V2.5的双ADC、`VO[4096]`和两阶段桥接接口为准。
 | [`V2.3_WORKSPACE_REORGANIZATION_2026-07-31.md`](V2.3_WORKSPACE_REORGANIZATION_2026-07-31.md) | V2.3工作区结构整理 |
 | [`V2.4_COMPACT_AXIS_AND_MODEL_VPP_2026-07-31.md`](V2.4_COMPACT_AXIS_AND_MODEL_VPP_2026-07-31.md) | V2.4紧凑坐标轴、周期同步和独立模型Mpp |
 | [`V2.5_DUAL_ADC_4096_VO_BRIDGE_2026-08-01.md`](V2.5_DUAL_ADC_4096_VO_BRIDGE_2026-08-01.md) | V2.5双ADC 4096点与VO浮点桥接 |
+| [`V2.6_PHASE_DIFFERENCE_FORMULA_VPP_2026-08-01.md`](V2.6_PHASE_DIFFERENCE_FORMULA_VPP_2026-08-01.md) | V2.6分量初相差与公式Vpp融合 |

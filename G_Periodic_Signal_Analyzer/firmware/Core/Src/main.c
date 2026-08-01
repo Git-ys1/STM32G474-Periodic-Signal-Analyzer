@@ -61,6 +61,8 @@ __IO uint8_t AdcConvEnd = 0;
 #define BOARD_KEY_CONTROL_ENABLE 1U
 #define BOARD_KEY_DEBOUNCE_MS    30U
 #define BOARD_KEY_LONG_PRESS_MS  1000U
+#define ANALYZER_PI              3.14159265358979323846f
+#define PHASE_MODEL_POINT_COUNT  4096U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -77,6 +79,17 @@ float F,V,FB,VB,VC,FC,TE,Vr=0;
 uint32_t valid_len;
 uint32_t discard_len;
 uint16_t flag=0;
+
+static float s_model_fundamental_hz;
+static float s_model_fundamental_amplitude_v;
+static float s_model_fundamental_phase_rad;
+static float s_model_harmonic2_amplitude_v;
+static float s_model_harmonic2_phase_rad;
+static float s_model_harmonic3_amplitude_v;
+static float s_model_harmonic3_phase_rad;
+static uint8_t s_model_harmonic2_order;
+static uint8_t s_model_harmonic3_order;
+static uint8_t s_model_component_count;
 
 #if defined(__ARMCC_VERSION)
 __attribute__((used)) int __ARM_use_no_argv;
@@ -136,6 +149,131 @@ static void BoardKey_Task(void)
     }
 }
 #endif
+
+/*
+ * 前级系统相移标定入口。当前队友版本尚未完成扫频建表，因此先返回0；
+ * 标定完成后只需替换本函数，不改变相位差与峰峰值重构主链。
+ */
+static float Frontend_PhaseRad(float frequency_hz)
+{
+    (void)frequency_hz;
+    return 0.0f;
+}
+
+static void PhaseModel_SetFundamental(float frequency_hz,
+                                      float amplitude_v,
+                                      float measured_phase_rad)
+{
+    s_model_fundamental_hz = frequency_hz;
+    s_model_fundamental_amplitude_v = amplitude_v;
+    s_model_fundamental_phase_rad = measured_phase_rad;
+    s_model_harmonic2_amplitude_v = 0.0f;
+    s_model_harmonic2_phase_rad = 0.0f;
+    s_model_harmonic3_amplitude_v = 0.0f;
+    s_model_harmonic3_phase_rad = 0.0f;
+    s_model_harmonic2_order = 0U;
+    s_model_harmonic3_order = 0U;
+    s_model_component_count = 1U;
+}
+
+static float PhaseModel_AddHarmonic(float frequency_hz,
+                                    float amplitude_v,
+                                    float measured_phase_rad)
+{
+    float corrected_phase_rad;
+    float corrected_fundamental_phase_rad;
+    float relative_phase_rad;
+    uint8_t harmonic_order;
+
+    if ((s_model_fundamental_hz <= 0.0f) ||
+        (s_model_component_count >= ANALYZER_MAX_COMPONENTS))
+    {
+        return 0.0f;
+    }
+
+    harmonic_order = (uint8_t)(frequency_hz /
+                               s_model_fundamental_hz + 0.5f);
+    if (harmonic_order < 1U)
+    {
+        harmonic_order = 1U;
+    }
+
+    corrected_phase_rad = measured_phase_rad -
+                          Frontend_PhaseRad(frequency_hz);
+    corrected_fundamental_phase_rad =
+        s_model_fundamental_phase_rad -
+        Frontend_PhaseRad(s_model_fundamental_hz);
+
+    /*
+     * goertzel_sync()对正弦的输出相位含有-PI/2的约定项。
+     * 以基波为相位原点后，第m次谐波相对相位为：
+     * phi_m = Phi_m - m*Phi_1 - (m-1)*PI/2。
+     */
+    relative_phase_rad = corrected_phase_rad -
+                         (float)harmonic_order *
+                             corrected_fundamental_phase_rad -
+                         ((float)harmonic_order - 1.0f) *
+                             (ANALYZER_PI / 2.0f);
+    relative_phase_rad = atan2f(sinf(relative_phase_rad),
+                                cosf(relative_phase_rad));
+
+    if (s_model_component_count == 1U)
+    {
+        s_model_harmonic2_order = harmonic_order;
+        s_model_harmonic2_amplitude_v = amplitude_v;
+        s_model_harmonic2_phase_rad = relative_phase_rad;
+    }
+    else
+    {
+        s_model_harmonic3_order = harmonic_order;
+        s_model_harmonic3_amplitude_v = amplitude_v;
+        s_model_harmonic3_phase_rad = relative_phase_rad;
+    }
+    s_model_component_count++;
+    return relative_phase_rad;
+}
+
+static float PhaseModel_CalculateVpp(void)
+{
+    float maximum_v = -1.0e30f;
+    float minimum_v = 1.0e30f;
+
+    for (uint32_t index = 0U;
+         index < PHASE_MODEL_POINT_COUNT;
+         ++index)
+    {
+        float phase_rad = 2.0f * ANALYZER_PI * (float)index /
+                          (float)PHASE_MODEL_POINT_COUNT;
+        float value_v = s_model_fundamental_amplitude_v *
+                        arm_sin_f32(phase_rad);
+
+        if (s_model_component_count >= 2U)
+        {
+            value_v += s_model_harmonic2_amplitude_v *
+                       arm_sin_f32(
+                           (float)s_model_harmonic2_order * phase_rad +
+                           s_model_harmonic2_phase_rad);
+        }
+        if (s_model_component_count >= 3U)
+        {
+            value_v += s_model_harmonic3_amplitude_v *
+                       arm_sin_f32(
+                           (float)s_model_harmonic3_order * phase_rad +
+                           s_model_harmonic3_phase_rad);
+        }
+
+        if (value_v > maximum_v)
+        {
+            maximum_v = value_v;
+        }
+        if (value_v < minimum_v)
+        {
+            minimum_v = value_v;
+        }
+    }
+
+    return maximum_v - minimum_v;
+}
 
 void sof()
 {
@@ -262,7 +400,10 @@ HAL_ADC_Stop_DMA(&hadc2);
 	}
 }
 
-/* ³�����ֵ: �ðٷ�λ�������� */
+/*
+ * 队友旧版分位峰峰值函数：本轮保留源码作历史对照，但运行链已停用。
+ * 当前Upp由Goertzel相位差和谐波模型直接合成，避免每帧执行4096点插入排序。
+ */
 float Vpp_Robust(const float *data, uint32_t len)
 {
     static float sorted[4096];
@@ -407,9 +548,15 @@ Display_Init(&huart3);
 			//arm_max_f32(VO, 2048, &vmax, &maxid);   /* �����ֵ */
 			//arm_min_f32(VO, 2048, &vmin, &minid);   /* ����Сֵ */
 
-			float vpp =Vpp_Robust(VO,4096)  ;            /* ���ֵ */
-
 			GoertzelResult r=goertzel_sync(VO,4096,ANALYZER_SAMPLE_RATE_HZ,F),rB=goertzel_sync(VO,4096,ANALYZER_SAMPLE_RATE_HZ,FB),rC=goertzel_sync(VO,4096,ANALYZER_SAMPLE_RATE_HZ,FC);
+			PhaseModel_SetFundamental(F, V, r.phase);
+			(void)PhaseModel_AddHarmonic(FB, VB, rB.phase);
+			if (flag == 3U)
+			{
+				(void)PhaseModel_AddHarmonic(FC, VC, rC.phase);
+			}
+			float vpp = PhaseModel_CalculateVpp();
+
 			AnalyzerBridge_PrepareReal(
 					VO,
 					ADC_SIZE,
@@ -418,8 +565,8 @@ Display_Init(&huart3);
 					spectrum_frequencies_hz,
 					spectrum_amplitudes_v
 			);
-			float Vrms=Vpp_R();
-			AnalyzerBridge_PublishPreparedReal(vpp, Vrms);
+			(void)Vpp_R();
+			AnalyzerBridge_PublishPreparedReal(vpp, Vr);
 
 			AdcConvEnd=0;
 			HAL_ADC_Start_DMA(&hadc1,(uint32_t*)adc_b,2048);

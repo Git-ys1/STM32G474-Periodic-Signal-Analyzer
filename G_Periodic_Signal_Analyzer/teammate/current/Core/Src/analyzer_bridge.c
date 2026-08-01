@@ -11,10 +11,10 @@
 #define ANALYZER_FREQ_SEARCH_HALF_HZ        500.0f
 #define ANALYZER_FREQ_SEARCH_STEP_HZ        10.0f
 #define ANALYZER_FREQ_SEARCH_COUNT          101U
-#define ANALYZER_MAX_SAMPLE_COUNT           2048U
+#define ANALYZER_MAX_SAMPLE_COUNT           4096U
 #define ANALYZER_HUBER_K                    1.345f
 #define ANALYZER_HUBER_SCALE_FACTOR         1.4826f
-#define ANALYZER_HUBER_MINIMUM_DELTA_LSB    1.5f
+#define ANALYZER_HUBER_MINIMUM_DELTA_MV     1.21f
 #define ANALYZER_HARMONIC_RATIO_TOLERANCE   0.15f
 #define ANALYZER_MODEL_MAX_COEFFICIENTS      (1U + 2U * ANALYZER_MAX_COMPONENTS)
 #define ANALYZER_MODEL_IRLS_PASSES           3U
@@ -52,23 +52,22 @@ static uint32_t s_next_sequence = 1U;
 static uint32_t s_random_state = 0x6D2B79F5UL;
 static uint8_t s_last_test_case = 0xFFU;
 static bool s_test_override = false;
+static bool s_real_publish_pending = false;
 static AnalyzerWaveformFoldMode s_waveform_fold_mode =
     ANALYZER_WAVEFORM_FOLD_HUBER;
 /*
- * 完整2048点ADC缓冲区按基频相位折叠到256个显示相位槽。
+ * 完整4096点ADC缓冲区按基频相位折叠到256个显示相位槽。
  * 两个工作数组必须是静态存储，避免占用仅1 KB的主栈。
  */
 static float s_phase_sum_mv[ANALYZER_DISPLAY_POINT_COUNT];
 static float s_phase_weight[ANALYZER_DISPLAY_POINT_COUNT];
 static float s_frequency_scores[ANALYZER_FREQ_SEARCH_COUNT];
 /*
- * Huber需要保存2048个第一遍残差以计算中位数和MAD。
- * 最近一帧真实ADC也保留在静态区，保证状态开关切换后可用同一帧
- * 立即重建，而不是等待下一帧或拿不同测试组做视觉比较。
+ * Huber需要保存4096个第一遍残差以计算中位数和MAD。
  */
 static float s_huber_workspace[ANALYZER_MAX_SAMPLE_COUNT];
 /*
- * 2048点Huber谐波拟合的最大正规方程仅为7x8，但若作为局部变量会占用
+ * 4096点Huber谐波拟合的最大正规方程仅为7x8，但若作为局部变量会占用
  * 约300字节主栈。启动文件只给主栈1 KB，故与其它大工作区一样放到
  * 模块静态区；桥接模块按单线程顺序调用，不存在重入冲突。
  */
@@ -81,11 +80,10 @@ static float s_model_step_real[ANALYZER_MAX_COMPONENTS];
 static float s_model_step_imag[ANALYZER_MAX_COMPONENTS];
 static float s_model_oscillator_real[ANALYZER_MAX_COMPONENTS];
 static float s_model_oscillator_imag[ANALYZER_MAX_COMPONENTS];
-static uint16_t s_latest_real_adc[ANALYZER_MAX_SAMPLE_COUNT];
-static uint16_t s_latest_real_sample_count = 0U;
-static float s_latest_real_volts_per_code = 0.0f;
-static float s_latest_real_sample_rate_hz = 0.0f;
-static bool s_latest_real_input_valid = false;
+#if ANALYZER_TEST_ENABLE
+/* 测试集仍是uint16_t数组，只在测试入口换算一次后复用正式VO链路。 */
+static float s_test_samples_v[ANALYZER_TEST_SAMPLE_COUNT];
+#endif
 
 /**
  * @brief 原地选择第k小浮点数，避免qsort递归和额外2048点副本。
@@ -208,9 +206,9 @@ static void AnalyzerBridge_SortComponents(AnalyzerComponent *components,
  * 频率之间的相对能量，因此无需换算为实际电压或执行幅值归一化。
  */
 static float AnalyzerBridge_CorrelationScore(
-    const uint16_t *adc_codes,
+    const float *samples_v,
     uint16_t sample_count,
-    float mean_code,
+    float mean_v,
     float sample_rate_hz,
     float frequency_hz)
 {
@@ -238,8 +236,7 @@ static float AnalyzerBridge_CorrelationScore(
 
     for (i = 0U; i < sample_count; ++i)
     {
-        float sample =
-            (float)adc_codes[i] - mean_code;
+        float sample = samples_v[i] - mean_v;
         float next_real;
 
         accumulator_real += sample * oscillator_real;
@@ -269,9 +266,9 @@ static float AnalyzerBridge_CorrelationScore(
  */
 static float AnalyzerBridge_RefineFundamentalForWaveform(
     const AnalyzerResult *result,
-    const uint16_t *adc_codes,
+    const float *samples_v,
     uint16_t sample_count,
-    float mean_code,
+    float mean_v,
     float sample_rate_hz)
 {
     uint8_t reference_index = 0U;
@@ -284,7 +281,7 @@ static float AnalyzerBridge_RefineFundamentalForWaveform(
     float fractional_offset = 0.0f;
 
     if ((result == NULL) ||
-        (adc_codes == NULL) ||
+        (samples_v == NULL) ||
         (result->component_count == 0U) ||
         (result->fundamental_hz <= 0.0f))
     {
@@ -337,9 +334,9 @@ static float AnalyzerBridge_RefineFundamentalForWaveform(
 
         s_frequency_scores[i] =
             AnalyzerBridge_CorrelationScore(
-                adc_codes,
+                samples_v,
                 sample_count,
-                mean_code,
+                mean_v,
                 sample_rate_hz,
                 candidate_tone
             );
@@ -391,10 +388,9 @@ static float AnalyzerBridge_RefineFundamentalForWaveform(
  */
 static bool AnalyzerBridge_ApplyHuberSecondPass(
     AnalyzerResult *result,
-    const uint16_t *adc_codes,
+    const float *samples_v,
     uint16_t sample_count,
-    float mean_code,
-    float volts_per_code,
+    float mean_v,
     float sample_rate_hz,
     float fold_frequency_hz)
 {
@@ -407,10 +403,9 @@ static bool AnalyzerBridge_ApplyHuberSecondPass(
     uint16_t i;
 
     if ((result == NULL) ||
-        (adc_codes == NULL) ||
+        (samples_v == NULL) ||
         (sample_count < 2U) ||
         (sample_count > ANALYZER_MAX_SAMPLE_COUNT) ||
-        (volts_per_code <= 0.0f) ||
         (sample_rate_hz <= 0.0f) ||
         (fold_frequency_hz <= 0.0f))
     {
@@ -449,10 +444,7 @@ static bool AnalyzerBridge_ApplyHuberSecondPass(
             fraction *
             (result->waveform_mv[index1] -
              result->waveform_mv[index0]);
-        sample_mv =
-            ((float)adc_codes[i] - mean_code) *
-            volts_per_code *
-            1000.0f;
+        sample_mv = (samples_v[i] - mean_v) * 1000.0f;
         s_huber_workspace[i] = sample_mv - predicted_mv;
 
         phase_cycles += phase_step;
@@ -481,15 +473,9 @@ static bool AnalyzerBridge_ApplyHuberSecondPass(
         );
     delta_mv =
         ANALYZER_HUBER_K * robust_scale_mv;
-    if (delta_mv <
-        ANALYZER_HUBER_MINIMUM_DELTA_LSB *
-        volts_per_code *
-        1000.0f)
+    if (delta_mv < ANALYZER_HUBER_MINIMUM_DELTA_MV)
     {
-        delta_mv =
-            ANALYZER_HUBER_MINIMUM_DELTA_LSB *
-            volts_per_code *
-            1000.0f;
+        delta_mv = ANALYZER_HUBER_MINIMUM_DELTA_MV;
     }
 
     /*
@@ -530,10 +516,7 @@ static bool AnalyzerBridge_ApplyHuberSecondPass(
             fraction *
             (result->waveform_mv[index1] -
              result->waveform_mv[index0]);
-        sample_mv =
-            ((float)adc_codes[i] - mean_code) *
-            volts_per_code *
-            1000.0f;
+        sample_mv = (samples_v[i] - mean_v) * 1000.0f;
         centered_residual =
             fabsf(
                 sample_mv -
@@ -817,9 +800,8 @@ static bool AnalyzerBridge_ApplySelectedHarmonicProjection(
 }
 
 bool AnalyzerBridge_CalculateRobustModelVpp(
-    const uint16_t *adc_codes,
+    const float *samples_v,
     uint16_t sample_count,
-    float volts_per_code,
     float sample_rate_hz,
     float refined_fundamental_hz,
     float reported_fundamental_hz,
@@ -830,7 +812,7 @@ bool AnalyzerBridge_CalculateRobustModelVpp(
 {
     uint8_t harmonic_count = 1U;
     uint8_t coefficient_count;
-    float mean_code = 0.0f;
+    float mean_v = 0.0f;
     float sample_scale_mv;
     float residual_center = 0.0f;
     float delta_mv = 0.0f;
@@ -844,12 +826,11 @@ bool AnalyzerBridge_CalculateRobustModelVpp(
     uint8_t row;
     uint8_t column;
 
-    if ((adc_codes == NULL) ||
+    if ((samples_v == NULL) ||
         (components == NULL) ||
         (model_vpp_mv == NULL) ||
         (sample_count < 2U) ||
         (sample_count > ANALYZER_MAX_SAMPLE_COUNT) ||
-        (volts_per_code <= 0.0f) ||
         (sample_rate_hz <= 0.0f) ||
         (refined_fundamental_hz <= 0.0f) ||
         (reported_fundamental_hz <= 0.0f) ||
@@ -864,7 +845,7 @@ bool AnalyzerBridge_CalculateRobustModelVpp(
 
     /*
      * 队友FFT只用于确定允许进入模型的整数谐波次数；幅值和相位均由
-     * 下面对2048个原始ADC样本的拟合重新求解。
+     * 下面对全部VO浮点电压样本的拟合重新求解。
      */
     for (component = 0U;
          (component < component_count) &&
@@ -917,11 +898,10 @@ bool AnalyzerBridge_CalculateRobustModelVpp(
 
     for (sample = 0U; sample < sample_count; ++sample)
     {
-        mean_code += (float)adc_codes[sample];
+        mean_v += samples_v[sample];
     }
-    mean_code /= (float)sample_count;
-    sample_scale_mv =
-        volts_per_code * 1000.0f / frontend_gain;
+    mean_v /= (float)sample_count;
+    sample_scale_mv = 1000.0f / frontend_gain;
 
     for (harmonic = 0U;
          harmonic < harmonic_count;
@@ -940,7 +920,7 @@ bool AnalyzerBridge_CalculateRobustModelVpp(
     /*
      * 第0轮是全部样本等权最小二乘；随后三轮使用上一轮残差的
      * median/MAD生成Huber权重。残差中心化只参与权重计算，真正拟合的
-     * 始终是原始2048点ADC电压，而不是残差或256槽波形。
+     * 始终是完整VO浮点电压，而不是残差或256槽波形。
      */
     for (iteration = 0U;
          iteration <= ANALYZER_MODEL_IRLS_PASSES;
@@ -958,8 +938,7 @@ bool AnalyzerBridge_CalculateRobustModelVpp(
         for (sample = 0U; sample < sample_count; ++sample)
         {
             float sample_mv =
-                ((float)adc_codes[sample] - mean_code) *
-                sample_scale_mv;
+                (samples_v[sample] - mean_v) * sample_scale_mv;
             float sample_weight = 1.0f;
 
             s_model_design_row[0] = 1.0f;
@@ -1158,8 +1137,7 @@ bool AnalyzerBridge_CalculateRobustModelVpp(
         for (sample = 0U; sample < sample_count; ++sample)
         {
             float sample_mv =
-                ((float)adc_codes[sample] - mean_code) *
-                sample_scale_mv;
+                (samples_v[sample] - mean_v) * sample_scale_mv;
             float predicted_mv = s_model_coefficients[0];
 
             for (harmonic = 0U;
@@ -1210,8 +1188,7 @@ bool AnalyzerBridge_CalculateRobustModelVpp(
         for (sample = 0U; sample < sample_count; ++sample)
         {
             float sample_mv =
-                ((float)adc_codes[sample] - mean_code) *
-                sample_scale_mv;
+                (samples_v[sample] - mean_v) * sample_scale_mv;
             float predicted_mv = s_model_coefficients[0];
 
             for (harmonic = 0U;
@@ -1257,18 +1234,14 @@ bool AnalyzerBridge_CalculateRobustModelVpp(
                 s_huber_workspace,
                 sample_count
             );
-        if (delta_mv <
-            ANALYZER_HUBER_MINIMUM_DELTA_LSB *
-            sample_scale_mv)
+        if (delta_mv < ANALYZER_HUBER_MINIMUM_DELTA_MV)
         {
-            delta_mv =
-                ANALYZER_HUBER_MINIMUM_DELTA_LSB *
-                sample_scale_mv;
+            delta_mv = ANALYZER_HUBER_MINIMUM_DELTA_MV;
         }
     }
 
     /*
-     * 拟合使用全部2048个时间样本；Vpp在4096个等相位模型点上求取，
+     * 拟合使用全部4096个时间样本；Vpp在4096个等相位模型点上求取，
      * 避免真实峰值恰好落在256槽之间。
      */
     for (harmonic = 0U;
@@ -1338,13 +1311,12 @@ bool AnalyzerBridge_CalculateRobustModelVpp(
 
 static bool AnalyzerBridge_BuildRealWaveform(
     AnalyzerResult *result,
-    const uint16_t *adc_codes,
+    const float *samples_v,
     uint16_t sample_count,
-    float volts_per_code,
     float sample_rate_hz)
 {
     float samples_per_period;
-    float mean_code = 0.0f;
+    float mean_v = 0.0f;
     float fold_frequency_hz;
     float phase_cycles = 0.0f;
     float phase_step;
@@ -1352,9 +1324,8 @@ static bool AnalyzerBridge_BuildRealWaveform(
     uint16_t i;
 
     if ((result == NULL) ||
-        (adc_codes == NULL) ||
+        (samples_v == NULL) ||
         (sample_count < 2U) ||
-        (volts_per_code <= 0.0f) ||
         (sample_rate_hz <= 0.0f) ||
         (result->fundamental_hz <= 0.0f))
     {
@@ -1368,16 +1339,16 @@ static bool AnalyzerBridge_BuildRealWaveform(
      */
     for (i = 0U; i < sample_count; ++i)
     {
-        mean_code += (float)adc_codes[i];
+        mean_v += samples_v[i];
     }
-    mean_code /= (float)sample_count;
+    mean_v /= (float)sample_count;
 
     fold_frequency_hz =
         AnalyzerBridge_RefineFundamentalForWaveform(
             result,
-            adc_codes,
+            samples_v,
             sample_count,
-            mean_code,
+            mean_v,
             sample_rate_hz
         );
 
@@ -1396,15 +1367,14 @@ static bool AnalyzerBridge_BuildRealWaveform(
     }
 
     /*
-     * 新Vpp与256槽显示链路相互独立：直接使用全部原始ADC点和同一个
+     * 新Vpp与256槽显示链路相互独立：直接使用全部VO浮点点和同一个
      * 细化基频拟合。真实前端折算回输入端时除以6；内部测试数组未经过
      * 实物放大链路，因此保持1倍，便于继续用理想测试值验证算法。
      */
     result->model_vpp_valid =
         AnalyzerBridge_CalculateRobustModelVpp(
-            adc_codes,
+            samples_v,
             sample_count,
-            volts_per_code,
             sample_rate_hz,
             fold_frequency_hz,
             result->fundamental_hz,
@@ -1447,10 +1417,7 @@ static bool AnalyzerBridge_BuildRealWaveform(
                 (index0 + 1U) %
                 ANALYZER_DISPLAY_POINT_COUNT
             );
-        sample_mv =
-            ((float)adc_codes[i] - mean_code) *
-            volts_per_code *
-            1000.0f;
+        sample_mv = (samples_v[i] - mean_v) * 1000.0f;
         weight0 = 1.0f - fraction;
 
         s_phase_sum_mv[index0] += sample_mv * weight0;
@@ -1571,10 +1538,9 @@ static bool AnalyzerBridge_BuildRealWaveform(
     {
         if (!AnalyzerBridge_ApplyHuberSecondPass(
                 result,
-                adc_codes,
+                samples_v,
                 sample_count,
-                mean_code,
-                volts_per_code,
+                mean_v,
                 sample_rate_hz,
                 fold_frequency_hz) ||
             !AnalyzerBridge_ApplySelectedHarmonicProjection(
@@ -1611,6 +1577,7 @@ static bool AnalyzerBridge_BuildTestResult(
     AnalyzerResult *result)
 {
     uint8_t component;
+    uint16_t sample;
 
     if ((test_case == NULL) || (result == NULL))
     {
@@ -1636,16 +1603,18 @@ static bool AnalyzerBridge_BuildTestResult(
             test_case->component_amplitudes_mv[component];
     }
 
-    /*
-     * 测试数据从与队友adc_b完全相同的uint16_t[2048]入口进入，
-     * 与真实结果共用AnalyzerBridge_BuildRealWaveform()，不再直接
-     * 在分析结果后合成256点理想波形。
-     */
+    for (sample = 0U; sample < ANALYZER_TEST_SAMPLE_COUNT; ++sample)
+    {
+        s_test_samples_v[sample] =
+            (float)test_case->adc_codes[sample] *
+            ANALYZER_TEST_VOLTS_PER_CODE;
+    }
+
+    /* 测试数组只在入口换算一次，随后与真实VO共用浮点波形链路。 */
     if (!AnalyzerBridge_BuildRealWaveform(
             result,
-            test_case->adc_codes,
+            s_test_samples_v,
             ANALYZER_TEST_SAMPLE_COUNT,
-            ANALYZER_TEST_VOLTS_PER_CODE,
             ANALYZER_TEST_SAMPLE_RATE_HZ))
     {
         return false;
@@ -1669,21 +1638,14 @@ void AnalyzerBridge_Init(void)
         SysTick->VAL;
     s_last_test_case = 0xFFU;
     s_test_override = false;
+    s_real_publish_pending = false;
     s_waveform_fold_mode = ANALYZER_WAVEFORM_FOLD_HUBER;
-    memset(s_latest_real_adc, 0, sizeof(s_latest_real_adc));
-    s_latest_real_sample_count = 0U;
-    s_latest_real_volts_per_code = 0.0f;
-    s_latest_real_sample_rate_hz = 0.0f;
-    s_latest_real_input_valid = false;
 }
 
-void AnalyzerBridge_PublishReal(
-    const uint16_t *adc_codes,
+void AnalyzerBridge_PrepareReal(
+    const float *samples_v,
     uint16_t sample_count,
-    float volts_per_code,
     float sample_rate_hz,
-    float vpp_v,
-    float vrms_v,
     uint8_t teammate_flag,
     const float frequencies_hz[ANALYZER_MAX_COMPONENTS],
     const float amplitudes_v[ANALYZER_MAX_COMPONENTS])
@@ -1691,9 +1653,12 @@ void AnalyzerBridge_PublishReal(
     uint8_t requested_count;
     uint8_t i;
 
-    if ((adc_codes == NULL) ||
+    s_real_publish_pending = false;
+
+    if ((samples_v == NULL) ||
         (frequencies_hz == NULL) ||
         (amplitudes_v == NULL) ||
+        (sample_count < 2U) ||
         (sample_count > ANALYZER_MAX_SAMPLE_COUNT))
     {
         return;
@@ -1714,8 +1679,6 @@ void AnalyzerBridge_PublishReal(
 
     memset(&s_publish_result, 0, sizeof(s_publish_result));
     s_publish_result.source = ANALYZER_SOURCE_REAL;
-    s_publish_result.vpp_mv = vpp_v * 1000.0f;
-    s_publish_result.vrms_mv = vrms_v * 1000.0f;
     s_publish_result.status_flags =
         ((uint32_t)teammate_flag &
          ANALYZER_STATUS_TEAMMATE_FLAG_MASK);
@@ -1750,26 +1713,30 @@ void AnalyzerBridge_PublishReal(
 
     if (!AnalyzerBridge_BuildRealWaveform(
             &s_publish_result,
-            adc_codes,
+            samples_v,
             sample_count,
-            volts_per_code,
             sample_rate_hz))
     {
         return;
     }
 
+    s_real_publish_pending = true;
+}
+
+void AnalyzerBridge_PublishPreparedReal(float vpp_v,
+                                        float vrms_v)
+{
+    if (!s_real_publish_pending)
+    {
+        return;
+    }
+
+    s_publish_result.vpp_mv = vpp_v * 1000.0f;
+    s_publish_result.vrms_mv = vrms_v * 1000.0f;
     s_publish_result.sequence = s_next_sequence++;
     s_publish_result.valid = 1U;
-    memcpy(
-        s_latest_real_adc,
-        adc_codes,
-        (size_t)sample_count * sizeof(adc_codes[0])
-    );
-    s_latest_real_sample_count = sample_count;
-    s_latest_real_volts_per_code = volts_per_code;
-    s_latest_real_sample_rate_hz = sample_rate_hz;
-    s_latest_real_input_valid = true;
     s_real_result = s_publish_result;
+    s_real_publish_pending = false;
 }
 
 bool AnalyzerBridge_GetLatest(AnalyzerResult *result)
@@ -1833,25 +1800,6 @@ void AnalyzerBridge_RunRandomTest(void)
 
 void AnalyzerBridge_UseRealResult(void)
 {
-    if ((s_real_result.valid != 0U) &&
-        (s_real_result.waveform_fold_mode !=
-         s_waveform_fold_mode) &&
-        s_latest_real_input_valid)
-    {
-        s_publish_result = s_real_result;
-        if (AnalyzerBridge_BuildRealWaveform(
-                &s_publish_result,
-                s_latest_real_adc,
-                s_latest_real_sample_count,
-                s_latest_real_volts_per_code,
-                s_latest_real_sample_rate_hz))
-        {
-            s_publish_result.sequence = s_next_sequence++;
-            s_publish_result.valid = 1U;
-            s_real_result = s_publish_result;
-        }
-    }
-
     s_test_override = false;
 }
 
@@ -1867,8 +1815,6 @@ bool AnalyzerBridge_IsTestOverrideActive(void)
 bool AnalyzerBridge_SetWaveformFoldMode(
     AnalyzerWaveformFoldMode mode)
 {
-    AnalyzerWaveformFoldMode previous_mode;
-
     if (mode >= ANALYZER_WAVEFORM_FOLD_MODE_COUNT)
     {
         return false;
@@ -1879,7 +1825,6 @@ bool AnalyzerBridge_SetWaveformFoldMode(
         return true;
     }
 
-    previous_mode = s_waveform_fold_mode;
     s_waveform_fold_mode = mode;
 
     /*
@@ -1897,7 +1842,8 @@ bool AnalyzerBridge_SetWaveformFoldMode(
                     &ANALYZER_TEST_CASES[s_last_test_case],
                     &s_publish_result))
             {
-                s_waveform_fold_mode = previous_mode;
+                s_waveform_fold_mode =
+                    s_test_result.waveform_fold_mode;
                 return false;
             }
 
@@ -1905,31 +1851,6 @@ bool AnalyzerBridge_SetWaveformFoldMode(
         }
 #endif
     }
-    else if (s_real_result.valid != 0U)
-    {
-        if (!s_latest_real_input_valid)
-        {
-            s_waveform_fold_mode = previous_mode;
-            return false;
-        }
-
-        s_publish_result = s_real_result;
-        if (!AnalyzerBridge_BuildRealWaveform(
-                &s_publish_result,
-                s_latest_real_adc,
-                s_latest_real_sample_count,
-                s_latest_real_volts_per_code,
-                s_latest_real_sample_rate_hz))
-        {
-            s_waveform_fold_mode = previous_mode;
-            return false;
-        }
-
-        s_publish_result.sequence = s_next_sequence++;
-        s_publish_result.valid = 1U;
-        s_real_result = s_publish_result;
-    }
-
     return true;
 }
 
